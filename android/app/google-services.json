@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "791588998878",
+    "project_id": "livaing-3ba94",
+    "storage_bucket": "livaing-3ba94.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:791588998878:android:456f53b1c16525fce83c4f",
+        "android_client_info": {
+          "package_name": "com.example.easy_livaign"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChgRdqel-zAhYfe2e5-wIr62WAPZs3ios"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:791588998878:android:f52f69444b91d200e83c4f",
+        "android_client_info": {
+          "package_name": "com.livaing.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChgRdqel-zAhYfe2e5-wIr62WAPZs3ios"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
