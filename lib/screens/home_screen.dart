@@ -1,8 +1,10 @@
+import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/house_service.dart';
+import '../services/rbac_service.dart';
 import 'house_dashboard_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
@@ -50,13 +52,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (shouldDelete != true) return;
 
-    await FirebaseFirestore.instance.collection('houses').doc(houseId).delete();
+    try {
+      await FirebaseFirestore.instance
+          .collection('houses')
+          .doc(houseId)
+          .delete();
+
+      // ignore: avoid_print
+      print("DELETE SUCCESS");
+    } catch (e) {
+      // ignore: avoid_print
+      print("DELETE FAILED: $e");
+      return;
+    }
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("House deleted")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("House deleted")));
   }
 
   @override
@@ -64,14 +78,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Scaffold(
-        body: Center(child: Text("User not logged in")),
-      );
+      return const Scaffold(body: Center(child: Text("User not logged in")));
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("LivAIgn Dev 🏠"),
+        title: const Text("LivAIgn"),
         actions: [
           IconButton(
             icon: const Icon(Icons.person),
@@ -117,10 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   final houseId = await _houseService.createHouse(name);
 
-                  await _houseService.logActivity(
-                    houseId,
-                    "created the house",
-                  );
+                  await _houseService.logActivity(houseId, "created the house");
 
                   houseNameController.clear();
 
@@ -135,9 +144,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 } catch (e) {
                   if (!context.mounted) return;
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Error: $e")),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("Error: $e")));
                 }
               },
               child: const Text("Create House"),
@@ -171,41 +180,74 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   return ListView.separated(
                     itemCount: houses.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final house = houses[index];
                       final data = house.data();
                       final name = data['name'] ?? 'Unnamed House';
-                      final ownerId = data['ownerId'];
-                      final isOwner = ownerId == user.uid;
 
                       return Card(
-                        child: ListTile(
-                          title: Text(name),
-                          subtitle: Text(
-                            isOwner
-                                ? "Creator • ID: ${house.id}"
-                                : "Member • ID: ${house.id}",
-                          ),
-                          trailing: isOwner
-                              ? IconButton(
-                                  icon: const Icon(Icons.delete),
-                                  color: Colors.red,
-                                  onPressed: () {
-                                    _deleteHouse(house.id, name);
+                        child:
+                            StreamBuilder<
+                              DocumentSnapshot<Map<String, dynamic>>
+                            >(
+                              stream: house.reference
+                                  .collection('members')
+                                  .doc(user.uid)
+                                  .snapshots(),
+                              builder: (context, memberSnapshot) {
+                                final member =
+                                    memberSnapshot.data?.data() ?? {};
+                                final role = member['role'] ?? 'member';
+                                final joinedAt = member['joinedAt'];
+
+                                final formattedDate = joinedAt != null
+                                    ? DateFormat(
+                                        'dd MMM yyyy',
+                                      ).format(joinedAt.toDate())
+                                    : 'Unknown date';
+
+                                final roleText =
+                                    role == 'admin' || role == 'owner'
+                                    ? 'Admin'
+                                    : 'Member';
+
+                                final subtitleText = roleText == 'Admin'
+                                    ? 'Admin - Created $formattedDate'
+                                    : 'Member - Joined $formattedDate';
+
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    child: Text(
+                                      name.isNotEmpty
+                                          ? name[0].toUpperCase()
+                                          : '?',
+                                    ),
+                                  ),
+                                  title: Text(name),
+                                  subtitle: Text(subtitleText),
+                                  trailing: RbacService.canDeleteHouse(member)
+                                      ? IconButton(
+                                          icon: const Icon(Icons.delete),
+                                          color: Colors.red,
+                                          onPressed: () {
+                                            _deleteHouse(house.id, name);
+                                          },
+                                        )
+                                      : const Icon(Icons.arrow_forward_ios),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => HouseDashboardScreen(
+                                          houseId: house.id,
+                                        ),
+                                      ),
+                                    );
                                   },
-                                )
-                              : const Icon(Icons.arrow_forward_ios),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    HouseDashboardScreen(houseId: house.id),
-                              ),
-                            );
-                          },
-                        ),
+                                );
+                              },
+                            ),
                       );
                     },
                   );
@@ -216,7 +258,7 @@ class _HomeScreenState extends State<HomeScreen> {
             TextField(
               controller: houseIdController,
               decoration: const InputDecoration(
-                labelText: "Enter House ID or Invite Link",
+                labelText: "Enter Invite Link",
                 border: OutlineInputBorder(),
               ),
             ),
@@ -230,10 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   final houseId = await _houseService.joinHouseFromInput(input);
 
-                  await _houseService.logActivity(
-                    houseId,
-                    "joined the house",
-                  );
+                  await _houseService.logActivity(houseId, "joined the house");
 
                   houseIdController.clear();
 
@@ -248,9 +287,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 } catch (e) {
                   if (!context.mounted) return;
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Error: $e")),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("Error: $e")));
                 }
               },
               child: const Text("Join House"),

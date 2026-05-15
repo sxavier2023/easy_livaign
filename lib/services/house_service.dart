@@ -25,13 +25,21 @@ class HouseService {
       'name': houseName,
       'ownerId': user.uid,
       'memberIds': [user.uid],
+      'members': {
+        user.uid: {
+          'role': 'admin',
+          'email': user.email ?? "unknown",
+          'joinedAt': Timestamp.now(),
+        },
+      },
       'createdAt': FieldValue.serverTimestamp(),
     });
 
     await doc.collection('members').doc(user.uid).set({
       'uid': user.uid,
+      'role': 'admin',
       'email': user.email ?? "unknown",
-      'role': 'owner',
+      'displayName': user.displayName ?? "Unknown member",
       'joinedAt': FieldValue.serverTimestamp(),
     });
 
@@ -54,6 +62,7 @@ class HouseService {
     }
 
     final houseRef = _firestore.collection('houses').doc(houseId);
+
     final houseDoc = await houseRef.get();
 
     if (!houseDoc.exists) {
@@ -61,18 +70,28 @@ class HouseService {
     }
 
     final memberRef = houseRef.collection('members').doc(user.uid);
+
     final memberDoc = await memberRef.get();
 
-    await houseRef.update({
-      'memberIds': FieldValue.arrayUnion([user.uid]),
-    });
-
+    // Prevent duplicate joins
     if (memberDoc.exists) return;
 
+    // Update house document
+    await houseRef.update({
+      'memberIds': FieldValue.arrayUnion([user.uid]),
+      'members.${user.uid}': {
+        'role': 'member',
+        'email': user.email ?? "unknown",
+        'joinedAt': Timestamp.now(),
+      },
+    });
+
+    // Create member subcollection document
     await memberRef.set({
       'uid': user.uid,
-      'email': user.email ?? "unknown",
       'role': 'member',
+      'email': user.email ?? "unknown",
+      'displayName': user.displayName ?? "Unknown member",
       'joinedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -93,11 +112,11 @@ class HouseService {
         .doc(houseId)
         .collection('messages')
         .add({
-      'text': message,
-      'uid': user.uid,
-      'email': user.email ?? "unknown",
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+          'text': message,
+          'uid': user.uid,
+          'email': user.email ?? "unknown",
+          'timestamp': FieldValue.serverTimestamp(),
+        });
   }
 
   Future<void> addTask(String houseId, String title) async {
@@ -111,11 +130,7 @@ class HouseService {
 
     if (taskTitle.isEmpty) return;
 
-    await _firestore
-        .collection('houses')
-        .doc(houseId)
-        .collection('tasks')
-        .add({
+    await _firestore.collection('houses').doc(houseId).collection('tasks').add({
       'title': taskTitle,
       'assignedTo': user.uid,
       'assignedEmail': user.email ?? "",
@@ -124,7 +139,7 @@ class HouseService {
     });
   }
 
-   Future<void> toggleTask(
+  Future<void> toggleTask(
     String houseId,
     String taskId,
     bool currentValue,
@@ -134,9 +149,7 @@ class HouseService {
         .doc(houseId)
         .collection('tasks')
         .doc(taskId)
-        .update({
-      'isDone': !currentValue,
-    });
+        .update({'isDone': !currentValue});
   }
 
   Future<void> logActivity(String houseId, String action) async {
@@ -151,11 +164,13 @@ class HouseService {
         .doc(houseId)
         .collection('activity')
         .add({
-      'uid': user.uid,
-      'email': user.email ?? "unknown",
-      'action': action,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+          'uid': user.uid,
+          'email': user.email ?? "unknown",
+          'message': action,
+          'action': action,
+          'timestamp': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
   }
 
   String _extractHouseId(String input) {
@@ -178,5 +193,3 @@ class HouseService {
     return value;
   }
 }
-
-

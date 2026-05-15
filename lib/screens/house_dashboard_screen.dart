@@ -2,18 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 
 import '../services/house_service.dart';
+import '../services/rbac_service.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
 
 class HouseDashboardScreen extends StatefulWidget {
   final String houseId;
 
-  const HouseDashboardScreen({
-    super.key,
-    required this.houseId,
-  });
+  const HouseDashboardScreen({super.key, required this.houseId});
 
   @override
   State<HouseDashboardScreen> createState() => _HouseDashboardScreenState();
@@ -52,9 +51,9 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Invite link copied")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Invite link copied")));
   }
 
   Future<void> _joinCurrentUserToHouse() async {
@@ -62,9 +61,9 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Joined house")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Joined house")));
   }
 
   Future<void> _sendEmailInvite() async {
@@ -78,15 +77,15 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
       'to': [email],
       'message': {
         'subject': 'Join my house on Easy LivAIgn',
-        'text': '''
+        'text':
+            '''
 You have been invited to join a house on Easy LivAIgn.
 
-House ID: ${widget.houseId}
 Invite link: $inviteLink
 ''',
-        'html': '''
+        'html':
+            '''
 <p>You have been invited to join a house on <b>Easy LivAIgn</b>.</p>
-<p><b>House ID:</b> ${widget.houseId}</p>
 <p><a href="$inviteLink">Join the house</a></p>
 ''',
       },
@@ -107,9 +106,9 @@ Invite link: $inviteLink
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Invite email sent")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Invite email sent")));
   }
 
   Future<void> _sendPhoneInvite() async {
@@ -129,9 +128,9 @@ Invite link: $inviteLink
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Phone invite created")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Phone invite created")));
   }
 
   Widget _buildOverviewTab() {
@@ -143,142 +142,111 @@ Invite link: $inviteLink
         }
 
         if (!snapshot.hasData) {
-  return const Center(
-    child: CircularProgressIndicator(),
-  );
-}
+          return const Center(child: CircularProgressIndicator());
+        }
 
-final data = snapshot.data!.data();
+        final data = snapshot.data!.data();
 
-if (data == null) {
-  return const Center(
-    child: Text("House not found"),
-  );
-}
+        if (data == null) {
+          return const Center(child: Text("House not found"));
+        }
 
-final taskCount = data['taskCount'] ?? 0;
+        final taskCount = data['taskCount'] ?? 0;
         return Padding(
-  padding: const EdgeInsets.all(16),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-
-      Text(
-        "🏠 ${data['name']}",
-        style: const TextStyle(
-          fontSize: 24,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-
-      const SizedBox(height: 20),
-
-      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: houseRef.collection('members').snapshots(),
-        builder: (context, memberSnapshot) {
-          final memberCount = memberSnapshot.data?.docs.length ?? 0;
-
-          return Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceAround,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _overviewCard(
-                "Members",
-                Icons.people,
-                memberCount.toString(),
+              Text(
+                data['name'] ?? "House",
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
 
-              _overviewCard(
-                "Tasks",
-                Icons.check_box,
-                taskCount.toString(),
+              const SizedBox(height: 20),
+
+              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: houseRef.collection('members').snapshots(),
+                builder: (context, memberSnapshot) {
+                  final memberCount = memberSnapshot.data?.docs.length ?? 0;
+
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _overviewCard(
+                        "Members",
+                        Icons.people,
+                        memberCount.toString(),
+                      ),
+
+                      _overviewCard(
+                        "Tasks",
+                        Icons.check_box,
+                        taskCount.toString(),
+                      ),
+
+                      _overviewCard("Chat", Icons.chat, "Live"),
+                    ],
+                  );
+                },
               ),
 
-              _overviewCard(
-                "Chat",
-                Icons.chat,
-                "Live",
+              const SizedBox(height: 30),
+
+              const Text(
+                "Recent Activity",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 10),
+
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('houses')
+                      .doc(widget.houseId)
+                      .collection('activity')
+                      .orderBy('timestamp', descending: true)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final items = snapshot.data!.docs;
+
+                    if (items.isEmpty) {
+                      return const Center(child: Text("No activity yet"));
+                    }
+
+                    return ListView.builder(
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final data =
+                            items[index].data() as Map<String, dynamic>;
+
+                        return Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.bolt),
+                            title: Text(data['message'] ?? ""),
+                            subtitle: const Text("House activity"),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             ],
-          );
-        },
-      ),
-
-      const SizedBox(height: 30),
-
-      const Text(
-        "📌 Recent Activity",
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-
-      const SizedBox(height: 10),
-
-      Expanded(
-        child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('houses')
-              .doc(widget.houseId)
-              .collection('activity')
-              .orderBy(
-                'timestamp',
-                descending: true,
-              )
-              .snapshots(),
-          builder: (context, snapshot) {
-
-            if (!snapshot.hasData) {
-              return const Center(
-                child: CircularProgressIndicator(),
-              );
-            }
-
-            final items = snapshot.data!.docs;
-
-            if (items.isEmpty) {
-              return const Center(
-                child: Text("No activity yet"),
-              );
-            }
-
-            return ListView.builder(
-              itemCount: items.length,
-              itemBuilder: (context, index) {
-
-                final data =
-                    items[index].data()
-                        as Map<String, dynamic>;
-
-                return Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.bolt),
-                    title: Text(
-                      data['message'] ?? "",
-                    ),
-                    subtitle: Text(
-                      data['email'] ?? "",
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
-    ],
-  ),
-);
+          ),
+        );
       },
     );
   }
 
-  Widget _overviewCard(
-    String title,
-    IconData icon,
-    String value,
-  ) {
+  Widget _overviewCard(String title, IconData icon, String value) {
     return Container(
       width: 100,
       padding: const EdgeInsets.all(12),
@@ -293,10 +261,7 @@ final taskCount = data['taskCount'] ?? 0;
           Text(title),
           Text(
             value,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
         ],
       ),
@@ -321,7 +286,8 @@ final taskCount = data['taskCount'] ?? 0;
             }
 
             final members = snapshot.data!.docs;
-            final isMember = currentUser != null &&
+            final isMember =
+                currentUser != null &&
                 members.any((doc) => doc.id == currentUser.uid);
 
             return Column(
@@ -337,9 +303,9 @@ final taskCount = data['taskCount'] ?? 0;
                       } catch (e) {
                         if (!context.mounted) return;
 
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text("Error: $e")),
-                        );
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text("Error: $e")));
                       }
                     },
                   ),
@@ -355,16 +321,25 @@ final taskCount = data['taskCount'] ?? 0;
                 else
                   ...members.map((doc) {
                     final data = doc.data();
-                    final role = data['role'] ?? "member";
+                    final isAdmin = RbacService.isAdmin(data);
+                    final displayName = data['displayName'];
+                    final email = data['email'];
+                    final joinedAt = data['joinedAt'];
+                    final formattedDate = joinedAt != null
+                        ? DateFormat('dd MMM yyyy').format(joinedAt.toDate())
+                        : 'Unknown date';
+                    final roleText = isAdmin ? 'Admin' : 'Member';
 
                     return Card(
                       child: ListTile(
-                        leading: Icon(
-                          role == 'owner' ? Icons.star : Icons.person,
-                          color: role == 'owner' ? Colors.orange : null,
+                        leading: CircleAvatar(
+                          child: Icon(
+                            isAdmin ? Icons.star : Icons.person,
+                            color: isAdmin ? Colors.orange : null,
+                          ),
                         ),
-                        title: Text(data['email'] ?? "Unknown"),
-                        subtitle: Text(role),
+                        title: Text(displayName ?? email ?? "Unknown user"),
+                        subtitle: Text("$roleText - Joined $formattedDate"),
                       ),
                     );
                   }),
@@ -421,7 +396,13 @@ final taskCount = data['taskCount'] ?? 0;
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("House: ${widget.houseId}"),
+        title: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: houseRef.snapshots(),
+          builder: (context, snapshot) {
+            final data = snapshot.data?.data();
+            return Text(data?['name'] ?? "House");
+          },
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.person),
@@ -462,7 +443,7 @@ final taskCount = data['taskCount'] ?? 0;
           _buildOverviewTab(),
           ChatTab(houseId: widget.houseId),
           TasksTab(houseId: widget.houseId),
-          const Center(child: Text("📦 Inventory coming soon")),
+          const Center(child: Text("Inventory coming soon")),
           _buildPeopleTab(),
         ],
       ),
@@ -473,10 +454,7 @@ final taskCount = data['taskCount'] ?? 0;
 class ChatTab extends StatefulWidget {
   final String houseId;
 
-  const ChatTab({
-    super.key,
-    required this.houseId,
-  });
+  const ChatTab({super.key, required this.houseId});
 
   @override
   State<ChatTab> createState() => _ChatTabState();
@@ -493,23 +471,25 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Future<void> _sendMessage() async {
-  try {
-    await houseService.sendMessage(widget.houseId, controller.text);
+    try {
+      await houseService.sendMessage(widget.houseId, controller.text);
 
-    await houseService.logActivity(
-      widget.houseId,
-      "sent a message",
-    );
+      try {
+        await houseService.logActivity(widget.houseId, "sent a message");
+      } catch (e) {
+        // ignore: avoid_print
+        print("ACTIVITY LOG FAILED: $e");
+      }
 
-    controller.clear();
-  } catch (e) {
-    if (!mounted) return;
+      controller.clear();
+    } catch (e) {
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Message Error: $e")),
-    );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Message Error: $e")));
+    }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -546,8 +526,9 @@ class _ChatTabState extends State<ChatTab> {
                   final data = messages[index].data() as Map<String, dynamic>;
 
                   return ListTile(
+                    leading: const CircleAvatar(child: Icon(Icons.person)),
                     title: Text(data['text'] ?? ""),
-                    subtitle: Text(data['email'] ?? "unknown"),
+                    subtitle: const Text("Message"),
                   );
                 },
               );
@@ -568,10 +549,7 @@ class _ChatTabState extends State<ChatTab> {
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.send),
-                onPressed: _sendMessage,
-              ),
+              IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
             ],
           ),
         ),
@@ -583,10 +561,7 @@ class _ChatTabState extends State<ChatTab> {
 class TasksTab extends StatefulWidget {
   final String houseId;
 
-  const TasksTab({
-    super.key,
-    required this.houseId,
-  });
+  const TasksTab({super.key, required this.houseId});
 
   @override
   State<TasksTab> createState() => _TasksTabState();
@@ -637,9 +612,9 @@ class _TasksTabState extends State<TasksTab> {
                   } catch (e) {
                     if (!context.mounted) return;
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("Task Error: $e")),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text("Task Error: $e")));
                   }
                 },
               ),
@@ -688,9 +663,7 @@ class _TasksTabState extends State<TasksTab> {
                         decoration: isDone ? TextDecoration.lineThrough : null,
                       ),
                     ),
-                    subtitle: Text(
-                      "Assigned to: ${data['assignedEmail'] ?? ""}",
-                    ),
+                    subtitle: const Text("Task"),
                   );
                 },
               );

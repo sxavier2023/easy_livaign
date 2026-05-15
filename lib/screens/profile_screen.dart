@@ -9,9 +9,7 @@ class ProfileScreen extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Profile"),
-      ),
+      appBar: AppBar(title: const Text("Profile")),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: user == null
@@ -30,16 +28,7 @@ class ProfileScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    user.email ?? "No email",
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 30),
-                  ListTile(
-                    leading: const Icon(Icons.badge),
-                    title: const Text("User ID"),
-                    subtitle: Text(user.uid),
-                  ),
+                  Text(user.email ?? "No email", textAlign: TextAlign.center),
                 ],
               ),
       ),
