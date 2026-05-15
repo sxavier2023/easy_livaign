@@ -1,6 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
 import '../services/house_service.dart';
+import 'house_dashboard_screen.dart';
+import 'profile_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,111 +20,244 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController houseNameController = TextEditingController();
   final TextEditingController houseIdController = TextEditingController();
 
-  String? currentHouseId;
+  @override
+  void dispose() {
+    houseNameController.dispose();
+    houseIdController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _deleteHouse(String houseId, String name) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Delete House"),
+          content: Text("Delete $name?"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Delete"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+
+    await FirebaseFirestore.instance.collection('houses').doc(houseId).delete();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("House deleted")),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Scaffold(
+        body: Center(child: Text("User not logged in")),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Easy LivAIgn 🏠"),
+        title: const Text("LivAIgn Dev 🏠"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: "Profile",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: "Settings",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: Padding(
-  padding: const EdgeInsets.all(16),
-  child: Column(
-    children: [
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: houseNameController,
+              decoration: const InputDecoration(
+                labelText: "Create House Name",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  final name = houseNameController.text.trim();
 
-      TextField(
-        controller: houseNameController,
-        decoration: const InputDecoration(
-          labelText: "Create House Name",
+                  if (name.isEmpty) return;
+
+                  final houseId = await _houseService.createHouse(name);
+
+                  await _houseService.logActivity(
+                    houseId,
+                    "created the house",
+                  );
+
+                  houseNameController.clear();
+
+                  if (!context.mounted) return;
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HouseDashboardScreen(houseId: houseId),
+                    ),
+                  );
+                } catch (e) {
+                  if (!context.mounted) return;
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Error: $e")),
+                  );
+                }
+              },
+              child: const Text("Create House"),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              "My Houses",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('houses')
+                    .where('memberIds', arrayContains: user.uid)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Text("Error: ${snapshot.error}");
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final houses = snapshot.data!.docs;
+
+                  if (houses.isEmpty) {
+                    return const Center(child: Text("No houses yet"));
+                  }
+
+                  return ListView.separated(
+                    itemCount: houses.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final house = houses[index];
+                      final data = house.data();
+                      final name = data['name'] ?? 'Unnamed House';
+                      final ownerId = data['ownerId'];
+                      final isOwner = ownerId == user.uid;
+
+                      return Card(
+                        child: ListTile(
+                          title: Text(name),
+                          subtitle: Text(
+                            isOwner
+                                ? "Creator • ID: ${house.id}"
+                                : "Member • ID: ${house.id}",
+                          ),
+                          trailing: isOwner
+                              ? IconButton(
+                                  icon: const Icon(Icons.delete),
+                                  color: Colors.red,
+                                  onPressed: () {
+                                    _deleteHouse(house.id, name);
+                                  },
+                                )
+                              : const Icon(Icons.arrow_forward_ios),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    HouseDashboardScreen(houseId: house.id),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            const Divider(),
+            TextField(
+              controller: houseIdController,
+              decoration: const InputDecoration(
+                labelText: "Enter House ID or Invite Link",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  final input = houseIdController.text.trim();
+
+                  if (input.isEmpty) return;
+
+                  final houseId = await _houseService.joinHouseFromInput(input);
+
+                  await _houseService.logActivity(
+                    houseId,
+                    "joined the house",
+                  );
+
+                  houseIdController.clear();
+
+                  if (!context.mounted) return;
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HouseDashboardScreen(houseId: houseId),
+                    ),
+                  );
+                } catch (e) {
+                  if (!context.mounted) return;
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Error: $e")),
+                  );
+                }
+              },
+              child: const Text("Join House"),
+            ),
+          ],
         ),
       ),
-
-      const SizedBox(height: 10),
-
-      ElevatedButton(
-        onPressed: () async {
-          final id = await _houseService.createHouse(
-            houseNameController.text.trim(),
-          );
-
-          setState(() {
-            currentHouseId = id;
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("House Created: $id")),
-          );
-        },
-        child: const Text("Create House"),
-      ),
-TextField(
-  controller: houseIdController,
-  decoration: const InputDecoration(
-    labelText: "Enter House ID",
-  ),
-),
-
-const SizedBox(height: 10),
-
-ElevatedButton(
-  onPressed: () async {
-    await _houseService.joinHouse(
-      houseIdController.text.trim(),
-    );
-
-    setState(() {
-      currentHouseId = houseIdController.text.trim();
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Joined House 🚀")),
-    );
-  },
-  child: const Text("Join House"),
-),
-            const Divider(height: 40),
-
-      currentHouseId == null
-          ? const Text("No house joined yet")
-          : StreamBuilder<DocumentSnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('houses')
-                  .doc(currentHouseId)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const CircularProgressIndicator();
-                }
-
-                final data =
-                    snapshot.data!.data() as Map<String, dynamic>;
-
-                final name = data['name'];
-                final members =
-                    List<String>.from(data['members'] ?? []);
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "🏠 House: $name",
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text("👥 Members: ${members.length}"),
-                    const SizedBox(height: 10),
-                    Text("House ID: $currentHouseId"),
-                  ],
-                );
-              },
-            ),
-    ],
-  ),
-),
     );
   }
 }
