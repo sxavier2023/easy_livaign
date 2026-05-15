@@ -112,9 +112,16 @@ Actively under development
 
 📎 How to Run
 git clone https://github.com/your-username/your-repo.git
-cd your-repo
-flutter pub get
-flutter run
+@echo off
+cd  "C:\yourrepoxx\easy_livaign"
+
+call flutter clean
+call flutter pub get
+call flutter run -d web-server
+
+Ctrl+Click on the generated local host link
+
+
 ⭐ Feedback
 
 If you have suggestions or feedback, feel free to open an issue or connect.
