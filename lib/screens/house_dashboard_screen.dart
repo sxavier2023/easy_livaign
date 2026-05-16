@@ -16,13 +16,17 @@ import '../widgets/app_state.dart';
 import '../widgets/brand_icon.dart';
 import '../widgets/theme_picker.dart';
 import 'inventory_screen.dart';
-import 'profile_screen.dart';
 import 'settings_screen.dart';
 
 class HouseDashboardScreen extends StatefulWidget {
   final String houseId;
+  final int initialTabIndex;
 
-  const HouseDashboardScreen({super.key, required this.houseId});
+  const HouseDashboardScreen({
+    super.key,
+    required this.houseId,
+    this.initialTabIndex = 0,
+  });
 
   @override
   State<HouseDashboardScreen> createState() => _HouseDashboardScreenState();
@@ -47,11 +51,18 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(
+      length: 5,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 4),
+    );
+    _tabController.addListener(_clearHighlightForCurrentTab);
+    _clearHighlightForCurrentTab();
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_clearHighlightForCurrentTab);
     _tabController.dispose();
     emailController.dispose();
     phoneController.dispose();
@@ -264,33 +275,27 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
     return hasRecentActivity && !_seenOverviewHighlights.contains(key);
   }
 
+  String? _overviewKeyForTab(int index) {
+    return switch (index) {
+      1 => 'chat',
+      2 => 'tasks',
+      3 => 'inventory',
+      4 => 'people',
+      _ => null,
+    };
+  }
+
+  void _clearHighlightForCurrentTab() {
+    final key = _overviewKeyForTab(_tabController.index);
+
+    if (key == null || _seenOverviewHighlights.contains(key)) return;
+
+    setState(() => _seenOverviewHighlights.add(key));
+  }
+
   void _openOverviewTarget(String key, int tabIndex) {
     setState(() => _seenOverviewHighlights.add(key));
     _tabController.animateTo(tabIndex);
-  }
-
-  void _openActivity(Map<String, dynamic> data) {
-    final text =
-        '${data['type'] ?? ''} ${data['action'] ?? ''} '
-                '${data['message'] ?? ''}'
-            .toLowerCase();
-
-    if (text.contains('chat') || text.contains('message')) {
-      _openOverviewTarget('chat', 1);
-      return;
-    }
-
-    if (text.contains('task')) {
-      _openOverviewTarget('tasks', 2);
-      return;
-    }
-
-    if (text.contains('inventory') || text.contains('stock')) {
-      _openOverviewTarget('inventory', 3);
-      return;
-    }
-
-    _openOverviewTarget('people', 4);
   }
 
   Widget _adminAnalyticsPanel({
@@ -571,39 +576,39 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
               const SizedBox(height: 10),
 
               Expanded(
-                child: StreamBuilder<QuerySnapshot>(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: _houseService.activityStream(widget.houseId),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const AppLoadingState(
-                        message: "Loading activity...",
-                      );
-                    }
-
-                    final items = snapshot.data!.docs;
+                  builder: (context, activitySnapshot) {
+                    final items = _overviewActivityItems(
+                      activities: activitySnapshot.data,
+                    );
 
                     if (items.isEmpty) {
-                      return const AppEmptyState(
-                        icon: Icons.bolt_outlined,
-                        title: "No activity yet",
-                        message:
-                            "House updates will appear here as people chat, join, and complete tasks.",
-                      );
+                      return const Center(child: Text("Nothing to show"));
                     }
 
                     return ListView.separated(
                       itemCount: items.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
-                        final data =
-                            items[index].data() as Map<String, dynamic>;
+                        final item = items[index];
+                        final target = item.target;
 
                         return Card(
                           child: ListTile(
-                            leading: const Icon(Icons.bolt),
-                            title: Text(data['message'] ?? ""),
-                            subtitle: const Text("House activity"),
-                            onTap: () => _openActivity(data),
+                            leading: CircleAvatar(child: Icon(item.icon)),
+                            title: Text(item.title),
+                            subtitle: Text(
+                              "${item.message}\n${item.formattedDate}",
+                            ),
+                            isThreeLine: true,
+                            trailing: target == null
+                                ? null
+                                : const Icon(Icons.arrow_forward_ios, size: 16),
+                            onTap: target == null
+                                ? null
+                                : () =>
+                                      _openOverviewTarget(target.$1, target.$2),
                           ),
                         );
                       },
@@ -841,46 +846,16 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
           },
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            tooltip: "Notifications",
-            onPressed: _showNotifications,
-          ),
           const ThemePickerButton(),
-          PopupMenuButton<String>(
-            tooltip: "More",
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              if (value == 'profile') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                );
-              }
-
-              if (value == 'settings') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              }
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: "Settings",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'profile',
-                child: ListTile(
-                  leading: Icon(Icons.person),
-                  title: Text("Profile"),
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: ListTile(
-                  leading: Icon(Icons.settings),
-                  title: Text("Settings"),
-                ),
-              ),
-            ],
           ),
         ],
         bottom: TabBar(
@@ -943,65 +918,119 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
     );
   }
 
-  Future<void> _showNotifications() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _houseService.notificationsStream(widget.houseId),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return AppErrorState(
-                title: "Could not load notifications",
-                error: snapshot.error,
-              );
-            }
+  List<_OverviewActivityItem> _overviewActivityItems({
+    QuerySnapshot<Map<String, dynamic>>? activities,
+  }) {
+    final items = <_OverviewActivityItem>[];
 
-            if (!snapshot.hasData) {
-              return const AppLoadingState(message: "Loading notifications...");
-            }
+    for (final doc in activities?.docs ?? const []) {
+      final data = doc.data();
+      final type = data['type']?.toString();
+      final createdAt =
+          _timestampDate(data['timestamp']) ??
+          _timestampDate(data['createdAt']);
+      final message = data['message']?.toString() ?? 'House update';
 
-            final notifications = snapshot.data!.docs;
+      items.add(
+        _OverviewActivityItem(
+          title: data['title']?.toString() ?? 'House activity',
+          message: message,
+          date: createdAt,
+          formattedDate: _activityDateText(createdAt),
+          icon: type == null ? Icons.bolt : _notificationIcon(type),
+          target: _notificationTarget(type) ?? _legacyActivityTarget(data),
+        ),
+      );
+    }
 
-            if (notifications.isEmpty) {
-              return const AppEmptyState(
-                icon: Icons.notifications_none,
-                title: "No notifications yet",
-                message: "Task assignments and completions will appear here.",
-              );
-            }
+    items.sort((a, b) => b.sortValue.compareTo(a.sortValue));
 
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              itemCount: notifications.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final data = notifications[index].data();
-                final createdAt = data['createdAt'];
-                final formattedDate = createdAt is Timestamp
-                    ? DateFormat('dd MMM, h:mm a').format(createdAt.toDate())
-                    : 'Just now';
-
-                return ListTile(
-                  leading: CircleAvatar(
-                    child: Icon(
-                      data['type'] == 'task_completed'
-                          ? Icons.task_alt
-                          : Icons.assignment_ind,
-                    ),
-                  ),
-                  title: Text(data['title'] ?? 'Notification'),
-                  subtitle: Text("${data['message'] ?? ''}\n$formattedDate"),
-                  isThreeLine: true,
-                );
-              },
-            );
-          },
-        );
-      },
-    );
+    return items.take(10).toList();
   }
+
+  DateTime? _timestampDate(Object? value) {
+    if (value is Timestamp) return value.toDate();
+
+    return null;
+  }
+
+  String _activityDateText(DateTime? date) {
+    if (date == null) return 'Just now';
+
+    return DateFormat('dd MMM, h:mm a').format(date);
+  }
+
+  IconData _notificationIcon(String? type) {
+    return switch (type) {
+      'task_completed' => Icons.task_alt,
+      'task_assigned' => Icons.assignment_ind,
+      'chat_message' => Icons.chat_bubble_outline,
+      'inventory_added' ||
+      'inventory_low_stock' ||
+      'purchase_added' => Icons.inventory_2_outlined,
+      'member_joined' => Icons.person_add_alt_1,
+      _ => Icons.notifications_outlined,
+    };
+  }
+
+  (String, int)? _notificationTarget(String? type) {
+    return switch (type) {
+      'chat_message' => ('chat', 1),
+      'task_assigned' || 'task_completed' => ('tasks', 2),
+      'inventory_added' ||
+      'inventory_low_stock' ||
+      'purchase_added' => ('inventory', 3),
+      'member_joined' => ('people', 4),
+      _ => null,
+    };
+  }
+
+  (String, int)? _legacyActivityTarget(Map<String, dynamic> data) {
+    final text =
+        '${data['type'] ?? ''} ${data['action'] ?? ''} '
+                '${data['message'] ?? ''}'
+            .toLowerCase();
+
+    if (text.contains('chat') || text.contains('message')) {
+      return ('chat', 1);
+    }
+
+    if (text.contains('task')) {
+      return ('tasks', 2);
+    }
+
+    if (text.contains('inventory') ||
+        text.contains('stock') ||
+        text.contains('purchase')) {
+      return ('inventory', 3);
+    }
+
+    if (text.contains('member') || text.contains('join')) {
+      return ('people', 4);
+    }
+
+    return null;
+  }
+}
+
+class _OverviewActivityItem {
+  final String title;
+  final String message;
+  final DateTime? date;
+  final String formattedDate;
+  final IconData icon;
+  final (String, int)? target;
+
+  const _OverviewActivityItem({
+    required this.title,
+    required this.message,
+    required this.date,
+    required this.formattedDate,
+    required this.icon,
+    required this.target,
+  });
+
+  int get sortValue => date?.millisecondsSinceEpoch ?? 0;
 }
 
 class ChatTab extends StatefulWidget {
@@ -1125,13 +1154,6 @@ class _ChatTabState extends State<ChatTab> {
     try {
       await houseService.sendMessage(widget.houseId, message);
 
-      try {
-        await houseService.logActivity(widget.houseId, "sent a message");
-      } catch (e) {
-        // ignore: avoid_print
-        print("ACTIVITY LOG FAILED: $e");
-      }
-
       controller.clear();
       _scrollToLatest();
     } catch (e) {
@@ -1175,6 +1197,36 @@ class _ChatTabState extends State<ChatTab> {
     return trimmed.isEmpty ? "?" : trimmed[0].toUpperCase();
   }
 
+  String _displayNameForMessage(
+    Map<String, dynamic> data,
+    Map<String, dynamic>? member,
+  ) {
+    return member?['displayName']?.toString() ??
+        data['displayName']?.toString() ??
+        member?['email']?.toString() ??
+        data['email']?.toString() ??
+        "House member";
+  }
+
+  Widget _messageAvatar(
+    Map<String, dynamic> data,
+    Map<String, dynamic>? member,
+  ) {
+    final photoUrl =
+        member?['photoUrl']?.toString() ?? data['photoUrl']?.toString();
+    final label = _displayNameForMessage(data, member);
+
+    return CircleAvatar(
+      radius: 14,
+      backgroundImage: photoUrl != null && photoUrl.isNotEmpty
+          ? NetworkImage(photoUrl)
+          : null,
+      child: photoUrl == null || photoUrl.isEmpty
+          ? Text(_initial(label), style: const TextStyle(fontSize: 11))
+          : null,
+    );
+  }
+
   String _messageTime(Map<String, dynamic> data) {
     final timestamp = data['timestamp'];
 
@@ -1187,11 +1239,12 @@ class _ChatTabState extends State<ChatTab> {
 
   Widget _messageBubble({
     required Map<String, dynamic> data,
+    required Map<String, dynamic>? member,
     required bool isMine,
-    required bool showSender,
+    required bool showAvatar,
   }) {
     final colors = Theme.of(context).colorScheme;
-    final email = data['email']?.toString() ?? "House member";
+    final senderName = _displayNameForMessage(data, member);
     final text = data['text']?.toString() ?? "";
     final bubbleColor = isMine
         ? colors.primaryContainer
@@ -1210,8 +1263,8 @@ class _ChatTabState extends State<ChatTab> {
                 : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (!isMine && showSender) ...[
-                CircleAvatar(radius: 14, child: Text(_initial(email))),
+              if (!isMine && showAvatar) ...[
+                _messageAvatar(data, member),
                 const SizedBox(width: 8),
               ] else if (!isMine) ...[
                 const SizedBox(width: 36),
@@ -1233,11 +1286,11 @@ class _ChatTabState extends State<ChatTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (!isMine && showSender)
+                        if (!isMine && showAvatar)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 3),
                             child: Text(
-                              email,
+                              senderName,
                               style: TextStyle(
                                 color: colors.primary,
                                 fontSize: 12,
@@ -1262,6 +1315,12 @@ class _ChatTabState extends State<ChatTab> {
                   ),
                 ),
               ),
+              if (isMine && showAvatar) ...[
+                const SizedBox(width: 8),
+                _messageAvatar(data, member),
+              ] else if (isMine) ...[
+                const SizedBox(width: 36),
+              ],
             ],
           ),
         ),
@@ -1297,25 +1356,36 @@ class _ChatTabState extends State<ChatTab> {
                   );
                 }
 
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: true,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  itemCount: _messages.length,
-                  itemBuilder: (context, index) {
-                    final data = _messages[index].data() ?? {};
-                    final currentUser = FirebaseAuth.instance.currentUser;
-                    final isMine = data['uid'] == currentUser?.uid;
-                    final nextData = index + 1 < _messages.length
-                        ? _messages[index + 1].data()
-                        : null;
-                    final showSender =
-                        !isMine && nextData?['email'] != data['email'];
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: houseService.membersStream(widget.houseId),
+                  builder: (context, memberSnapshot) {
+                    final memberMap = {
+                      for (final member in memberSnapshot.data?.docs ?? [])
+                        member.id: member.data(),
+                    };
 
-                    return _messageBubble(
-                      data: data,
-                      isMine: isMine,
-                      showSender: showSender,
+                    return ListView.builder(
+                      controller: _scrollController,
+                      reverse: true,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) {
+                        final data = _messages[index].data() ?? {};
+                        final currentUser = FirebaseAuth.instance.currentUser;
+                        final senderId = data['uid']?.toString();
+                        final isMine = senderId == currentUser?.uid;
+                        final nextData = index + 1 < _messages.length
+                            ? _messages[index + 1].data()
+                            : null;
+                        final showAvatar = nextData?['uid'] != data['uid'];
+
+                        return _messageBubble(
+                          data: data,
+                          member: senderId == null ? null : memberMap[senderId],
+                          isMine: isMine,
+                          showAvatar: showAvatar,
+                        );
+                      },
                     );
                   },
                 );
@@ -1365,6 +1435,20 @@ class _TasksTabState extends State<TasksTab> {
   final TextEditingController taskController = TextEditingController();
   final HouseService houseService = HouseService();
   final TaskService taskService = TaskService();
+  static const List<String> _choreSuggestions = [
+    'Vacuum',
+    'Take out trash',
+    'Clean kitchen',
+    'Clean bathroom',
+    'Laundry',
+    'Wash dishes',
+    'Mop floor',
+    'Dust shelves',
+    'Lawn cleaning',
+    'Water plants',
+    'Grocery run',
+    'Change bedsheets',
+  ];
   String _taskFilter = 'all';
   String _completionFilter = 'active';
   static const Map<String, String> _taskStatuses = {
@@ -1421,6 +1505,47 @@ class _TasksTabState extends State<TasksTab> {
       child: photoUrl == null || photoUrl.isEmpty
           ? Text(_initialsFromMember(member))
           : null,
+    );
+  }
+
+  List<String> _filteredChoreSuggestions(TextEditingController controller) {
+    final query = controller.text.trim().toLowerCase();
+    final matches = query.isEmpty
+        ? _choreSuggestions
+        : _choreSuggestions
+              .where((item) => item.toLowerCase().contains(query))
+              .toList();
+
+    return matches.take(12).toList();
+  }
+
+  Widget _choreSuggestionChips({
+    required TextEditingController controller,
+    required StateSetter setDialogState,
+  }) {
+    final suggestions = _filteredChoreSuggestions(controller);
+
+    if (suggestions.isEmpty) return const SizedBox.shrink();
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: suggestions.map((suggestion) {
+          return ActionChip(
+            label: Text(suggestion),
+            onPressed: () {
+              setDialogState(() {
+                controller.text = suggestion;
+                controller.selection = TextSelection.collapsed(
+                  offset: suggestion.length,
+                );
+              });
+            },
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -1486,10 +1611,16 @@ class _TasksTabState extends State<TasksTab> {
                     TextField(
                       controller: titleController,
                       textCapitalization: TextCapitalization.sentences,
+                      onChanged: (_) => setDialogState(() {}),
                       decoration: const InputDecoration(
                         labelText: "Task title",
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    _choreSuggestionChips(
+                      controller: titleController,
+                      setDialogState: setDialogState,
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String?>(

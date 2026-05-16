@@ -62,6 +62,7 @@ class NotificationService {
         'type': type,
         'title': title,
         'message': message,
+        'houseId': houseId,
         'userId': targetUserId,
         'createdBy': user?.uid,
         'createdAt': FieldValue.serverTimestamp(),
@@ -74,6 +75,26 @@ class NotificationService {
           .doc(houseId)
           .collection('notifications')
           .add(notification);
+
+      try {
+        await _db.collection('houses').doc(houseId).collection('activity').add({
+          ...notification,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        // House activity is local UI history; notification delivery should
+        // still succeed if activity rules are temporarily stricter.
+        // ignore: avoid_print
+        print("ACTIVITY WRITE FAILED: $e");
+      }
+
+      try {
+        await _cleanupOldHouseNotifications(houseId);
+      } catch (e) {
+        // Cleanup can be retried later and should not block the notification.
+        // ignore: avoid_print
+        print("NOTIFICATION CLEANUP FAILED: $e");
+      }
 
       await _db.collection('pushQueue').add({
         ...notification,
@@ -104,5 +125,33 @@ class NotificationService {
           'platform': 'flutter',
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+  }
+
+  Future<void> _cleanupOldHouseNotifications(
+    String houseId, {
+    int keepLatest = 25,
+  }) async {
+    final snapshot = await _db
+        .collection('houses')
+        .doc(houseId)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .get();
+
+    final staleDocs = snapshot.docs.skip(keepLatest).toList();
+
+    for (var index = 0; index < staleDocs.length; index += 450) {
+      final batch = _db.batch();
+      final chunk = staleDocs.sublist(
+        index,
+        index + 450 > staleDocs.length ? staleDocs.length : index + 450,
+      );
+
+      for (final doc in chunk) {
+        batch.delete(doc.reference);
+      }
+
+      await batch.commit();
+    }
   }
 }

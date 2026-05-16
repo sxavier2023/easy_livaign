@@ -167,13 +167,30 @@ class TaskService {
     required String taskId,
     String? userId,
   }) async {
+    final houseName = await _houseName(houseId);
+
     await NotificationService().createHouseNotification(
       houseId: houseId,
       type: type,
       title: title,
-      message: message,
+      message: _withHouseName(message, houseName),
       targetUserId: userId,
-      data: {'taskId': taskId},
+      data: {'taskId': taskId, 'houseName': houseName},
     );
+  }
+
+  Future<String> _houseName(String houseId) async {
+    final doc = await _db.collection('houses').doc(houseId).get();
+
+    return doc.data()?['name']?.toString() ?? 'this house';
+  }
+
+  String _withHouseName(String message, String houseName) {
+    final trimmed = message.trim();
+    final noPeriod = trimmed.endsWith('.')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+
+    return '$noPeriod in $houseName.';
   }
 }

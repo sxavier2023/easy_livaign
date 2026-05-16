@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
 import 'login_screen.dart';
+import 'profile_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -46,15 +47,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(title: const Text("Settings")),
       body: ListView(
         children: [
-          const ListTile(
-            leading: Icon(Icons.notifications),
-            title: Text("Notifications"),
-            subtitle: Text("Coming soon"),
+          ListTile(
+            leading: const Icon(Icons.person),
+            title: const Text("Profile"),
+            subtitle: const Text("Avatar and display name"),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              );
+            },
           ),
           const ListTile(
             leading: Icon(Icons.lock),
             title: Text("Privacy"),
-            subtitle: Text("Coming soon"),
+            subtitle: Text("Account and data controls coming soon"),
           ),
           const Divider(),
           ListTile(

@@ -13,6 +13,16 @@ class InventoryService {
     ).orderBy('createdAt', descending: true).snapshots();
   }
 
+  Future<QuerySnapshot<Map<String, dynamic>>> getItemsSnapshot(String houseId) {
+    return _inventoryRef(houseId).orderBy('createdAt', descending: true).get();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> purchasesStream(String houseId) {
+    return _purchasesRef(
+      houseId,
+    ).orderBy('purchasedAt', descending: true).limit(100).snapshots();
+  }
+
   Future<void> addItem({
     required String houseId,
     required String name,
@@ -51,12 +61,14 @@ class InventoryService {
       unit: unit,
     );
 
+    final houseName = await _houseName(houseId);
+
     await NotificationService().createHouseNotification(
       houseId: houseId,
       type: 'inventory_added',
       title: 'Inventory updated',
-      message: '$itemName was added to inventory.',
-      data: {'itemId': doc.id},
+      message: '$itemName was added to inventory in $houseName.',
+      data: {'itemId': doc.id, 'houseName': houseName},
     );
   }
 
@@ -128,14 +140,107 @@ class InventoryService {
     );
 
     if (quantityValue <= 1) {
+      final houseName = await _houseName(houseId);
+
       await NotificationService().createHouseNotification(
         houseId: houseId,
         type: 'inventory_low_stock',
         title: quantityValue <= 0 ? 'Out of stock' : 'Low stock',
-        message: '$itemName is now $quantityValue $unit.',
-        data: {'itemId': itemId},
+        message: '$itemName is now $quantityValue $unit in $houseName.',
+        data: {'itemId': itemId, 'houseName': houseName},
       );
     }
+  }
+
+  Future<void> addPurchase({
+    required String houseId,
+    String? itemId,
+    required String itemName,
+    required int quantity,
+    required String unit,
+    required DateTime purchasedAt,
+    bool addToStock = true,
+  }) async {
+    final user = _currentUser();
+    final trimmedName = itemName.trim();
+
+    if (trimmedName.isEmpty) return;
+
+    final quantityValue = quantity < 0 ? 0 : quantity;
+    String? resolvedItemId = itemId;
+
+    if (addToStock) {
+      if (resolvedItemId == null || resolvedItemId.isEmpty) {
+        final itemDoc = await _inventoryRef(houseId).add({
+          'name': trimmedName,
+          'quantity': quantityValue,
+          'unit': unit,
+          'addedBy': user.uid,
+          'addedByEmail': user.email ?? "",
+          'addedByName': user.displayName ?? "House member",
+          'updatedBy': user.uid,
+          'updatedByEmail': user.email ?? "",
+          'updatedByName': user.displayName ?? "House member",
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        resolvedItemId = itemDoc.id;
+      } else {
+        final itemRef = _inventoryRef(houseId).doc(resolvedItemId);
+        final itemDoc = await itemRef.get();
+        final previousData = itemDoc.data() ?? {};
+        final currentQuantity =
+            (previousData['quantity'] as num?)?.toInt() ?? 0;
+
+        await itemRef.update({
+          'quantity': currentQuantity + quantityValue,
+          'unit': unit,
+          'updatedBy': user.uid,
+          'updatedByEmail': user.email ?? "",
+          'updatedByName': user.displayName ?? "House member",
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
+
+    final purchaseDoc = await _purchasesRef(houseId).add({
+      'itemId': resolvedItemId,
+      'itemName': trimmedName,
+      'quantity': quantityValue,
+      'unit': unit,
+      'boughtBy': user.uid,
+      'boughtByEmail': user.email ?? "",
+      'boughtByName': user.displayName ?? "House member",
+      'purchasedAt': Timestamp.fromDate(purchasedAt),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    if (resolvedItemId != null && resolvedItemId.isNotEmpty) {
+      await _logItemChange(
+        houseId: houseId,
+        itemId: resolvedItemId,
+        action: 'purchased',
+        itemName: trimmedName,
+        newQuantity: quantityValue,
+        unit: unit,
+      );
+    }
+
+    final houseName = await _houseName(houseId);
+
+    await NotificationService().createHouseNotification(
+      houseId: houseId,
+      type: 'purchase_added',
+      title: 'Purchase added',
+      message:
+          '${user.displayName ?? user.email ?? 'Someone'} bought $quantityValue $unit of $trimmedName for $houseName.',
+      data: {
+        'purchaseId': purchaseDoc.id,
+        'itemId': resolvedItemId,
+        'houseName': houseName,
+      },
+    );
   }
 
   Future<void> deleteItem(String houseId, String itemId) async {
@@ -188,6 +293,10 @@ class InventoryService {
     return _firestore.collection('houses').doc(houseId).collection('inventory');
   }
 
+  CollectionReference<Map<String, dynamic>> _purchasesRef(String houseId) {
+    return _firestore.collection('houses').doc(houseId).collection('purchases');
+  }
+
   User _currentUser() {
     final user = _auth.currentUser;
 
@@ -229,5 +338,11 @@ class InventoryService {
           .collection('inventoryHistory')
           .add(payload);
     }
+  }
+
+  Future<String> _houseName(String houseId) async {
+    final doc = await _firestore.collection('houses').doc(houseId).get();
+
+    return doc.data()?['name']?.toString() ?? 'this house';
   }
 }

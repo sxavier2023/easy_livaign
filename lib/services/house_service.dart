@@ -36,9 +36,11 @@ class HouseService {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> activityStream(String houseId) {
-    return houseRef(
-      houseId,
-    ).collection('activity').orderBy('timestamp', descending: true).snapshots();
+    return houseRef(houseId)
+        .collection('activity')
+        .orderBy('timestamp', descending: true)
+        .limit(10)
+        .snapshots();
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> messagesStream(
@@ -60,13 +62,35 @@ class HouseService {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> notificationsStream(
-    String houseId,
-  ) {
+    String houseId, {
+    int limit = 25,
+  }) {
     return houseRef(houseId)
         .collection('notifications')
         .orderBy('createdAt', descending: true)
-        .limit(25)
+        .limit(limit)
         .snapshots();
+  }
+
+  Future<void> cleanupOldNotifications(
+    String houseId, {
+    int keepLatest = 25,
+  }) async {
+    final snapshot = await houseRef(
+      houseId,
+    ).collection('notifications').orderBy('createdAt', descending: true).get();
+
+    final staleDocs = snapshot.docs.skip(keepLatest);
+
+    for (final chunk in _chunks(staleDocs.toList(), 450)) {
+      final batch = _firestore.batch();
+
+      for (final doc in chunk) {
+        batch.delete(doc.reference);
+      }
+
+      await batch.commit();
+    }
   }
 
   Future<String> createHouse({
@@ -174,6 +198,7 @@ class HouseService {
     }
 
     final houseData = houseDoc.data() ?? {};
+    final houseName = houseData['name']?.toString() ?? 'this house';
     final currentCode = houseData['inviteCode']?.toString().toUpperCase();
     final expiresAt = houseData['inviteExpiresAt'];
 
@@ -217,8 +242,10 @@ class HouseService {
       houseId: houseId,
       type: 'member_joined',
       title: 'New member joined',
-      message: '${user.displayName ?? user.email ?? 'A new member'} joined.',
+      message:
+          '${user.displayName ?? user.email ?? 'A new member'} joined $houseName.',
       targetUserId: user.uid,
+      data: {'houseName': houseName},
     );
   }
 
@@ -233,6 +260,9 @@ class HouseService {
 
     if (message.isEmpty) return;
 
+    final houseDoc = await houseRef(houseId).get();
+    final houseName = houseDoc.data()?['name']?.toString() ?? 'this house';
+
     final doc = await _firestore
         .collection('houses')
         .doc(houseId)
@@ -241,6 +271,8 @@ class HouseService {
           'text': message,
           'uid': user.uid,
           'email': user.email ?? "unknown",
+          'displayName': user.displayName,
+          'photoUrl': user.photoURL,
           'timestamp': FieldValue.serverTimestamp(),
         });
 
@@ -248,8 +280,9 @@ class HouseService {
       houseId: houseId,
       type: 'chat_message',
       title: 'New chat message',
-      message: '${user.displayName ?? user.email ?? 'Someone'}: $message',
-      data: {'messageId': doc.id},
+      message:
+          '${user.displayName ?? user.email ?? 'Someone'} sent a message in $houseName.',
+      data: {'messageId': doc.id, 'houseName': houseName, 'preview': message},
     );
   }
 
@@ -290,6 +323,34 @@ class HouseService {
       batch.set(
         house.reference.collection('members').doc(user.uid),
         {'photoUrl': imageUrl},
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> updateDisplayNameAcrossMemberships(String displayName) async {
+    final user = _auth.currentUser;
+    final name = displayName.trim();
+
+    if (user == null) {
+      throw Exception("User not logged in");
+    }
+
+    if (name.isEmpty) return;
+
+    final houses = await _firestore
+        .collection('houses')
+        .where('memberIds', arrayContains: user.uid)
+        .get();
+
+    final batch = _firestore.batch();
+
+    for (final house in houses.docs) {
+      batch.set(
+        house.reference.collection('members').doc(user.uid),
+        {'displayName': name},
         SetOptions(merge: true),
       );
     }
@@ -463,5 +524,14 @@ Invite link: $inviteLink
     final random = Random.secure();
 
     return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  Iterable<List<T>> _chunks<T>(List<T> values, int size) sync* {
+    for (var index = 0; index < values.length; index += size) {
+      yield values.sublist(
+        index,
+        index + size > values.length ? values.length : index + size,
+      );
+    }
   }
 }

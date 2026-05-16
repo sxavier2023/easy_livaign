@@ -17,7 +17,70 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   final List<String> _units = const ['pcs', 'kg', 'liter'];
+  static const List<String> _householdItemSuggestions = [
+    'Toilet paper',
+    'Soap',
+    'Dish soap',
+    'Laundry detergent',
+    'Rice',
+    'Milk',
+    'Eggs',
+    'Bread',
+    'Trash bags',
+    'Cleaning spray',
+    'Sponge',
+    'Toothpaste',
+  ];
   final InventoryService _inventoryService = InventoryService();
+  String _selectedView = 'stock';
+
+  List<String> _filteredSuggestions(
+    List<String> suggestions,
+    TextEditingController controller,
+  ) {
+    final query = controller.text.trim().toLowerCase();
+    final matches = query.isEmpty
+        ? suggestions
+        : suggestions
+              .where((item) => item.toLowerCase().contains(query))
+              .toList();
+
+    return matches.take(12).toList();
+  }
+
+  Widget _suggestionChips({
+    required List<String> suggestions,
+    required TextEditingController controller,
+    required StateSetter setDialogState,
+    bool enabled = true,
+  }) {
+    if (!enabled) return const SizedBox.shrink();
+
+    final visibleSuggestions = _filteredSuggestions(suggestions, controller);
+
+    if (visibleSuggestions.isEmpty) return const SizedBox.shrink();
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: visibleSuggestions.map((suggestion) {
+          return ActionChip(
+            label: Text(suggestion),
+            onPressed: () {
+              setDialogState(() {
+                controller.text = suggestion;
+                controller.selection = TextSelection.collapsed(
+                  offset: suggestion.length,
+                );
+              });
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
 
   Future<void> _showItemDialog({
     String? itemId,
@@ -44,10 +107,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   TextField(
                     controller: nameController,
                     textCapitalization: TextCapitalization.sentences,
+                    onChanged: (_) => setDialogState(() {}),
                     decoration: const InputDecoration(
                       labelText: "Item name",
                       border: OutlineInputBorder(),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  _suggestionChips(
+                    suggestions: _householdItemSuggestions,
+                    controller: nameController,
+                    setDialogState: setDialogState,
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -114,6 +184,199 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     Navigator.pop(context);
                   },
                   child: Text(itemId == null ? "Add" : "Save"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showPurchaseDialog() async {
+    final itemsSnapshot = await _inventoryService.getItemsSnapshot(
+      widget.houseId,
+    );
+    final items = itemsSnapshot.docs;
+    final nameController = TextEditingController();
+    final quantityController = TextEditingController(text: '1');
+    String selectedUnit = _units.first;
+    String? selectedItemId;
+    bool addToStock = true;
+    DateTime purchasedAt = DateTime.now();
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final selectedItem = selectedItemId == null
+                ? null
+                : items.where((item) => item.id == selectedItemId).firstOrNull;
+
+            return AlertDialog(
+              title: const Text("Add Purchase"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String?>(
+                      initialValue: selectedItemId,
+                      decoration: const InputDecoration(
+                        labelText: "Inventory item",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text("New item"),
+                        ),
+                        ...items.map((item) {
+                          final data = item.data();
+                          final name = data['name']?.toString() ?? 'Item';
+
+                          return DropdownMenuItem<String?>(
+                            value: item.id,
+                            child: Text(name),
+                          );
+                        }),
+                      ],
+                      onChanged: (value) {
+                        final nextItem = value == null
+                            ? null
+                            : items
+                                  .where((item) => item.id == value)
+                                  .firstOrNull;
+                        setDialogState(() {
+                          selectedItemId = value;
+                          final data = nextItem?.data();
+                          if (data != null) {
+                            nameController.text =
+                                data['name']?.toString() ?? '';
+                            selectedUnit =
+                                data['unit']?.toString() ?? _units.first;
+                          } else {
+                            nameController.clear();
+                          }
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameController,
+                      enabled: selectedItemId == null,
+                      textCapitalization: TextCapitalization.sentences,
+                      onChanged: (_) => setDialogState(() {}),
+                      decoration: const InputDecoration(
+                        labelText: "What was bought",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _suggestionChips(
+                      suggestions: _householdItemSuggestions,
+                      controller: nameController,
+                      setDialogState: setDialogState,
+                      enabled: selectedItemId == null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: quantityController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: "Quantity",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedUnit,
+                      decoration: const InputDecoration(
+                        labelText: "Unit",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _units
+                          .map(
+                            (unit) => DropdownMenuItem(
+                              value: unit,
+                              child: Text(unit),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+
+                        setDialogState(() => selectedUnit = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.event),
+                      label: Text(
+                        DateFormat('dd MMM yyyy').format(purchasedAt),
+                      ),
+                      onPressed: () async {
+                        final pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: purchasedAt,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2100),
+                        );
+
+                        if (pickedDate == null) return;
+
+                        setDialogState(() => purchasedAt = pickedDate);
+                      },
+                    ),
+                    CheckboxListTile(
+                      value: addToStock,
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text("Add this purchase to stock"),
+                      subtitle: const Text(
+                        "Keeps purchase history and inventory quantity connected.",
+                      ),
+                      onChanged: (value) {
+                        setDialogState(() => addToStock = value ?? true);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final selectedData = selectedItem?.data();
+                    final itemName =
+                        selectedData?['name']?.toString() ??
+                        nameController.text.trim();
+                    final quantity =
+                        int.tryParse(quantityController.text.trim()) ?? 0;
+
+                    if (itemName.trim().isEmpty || quantity <= 0) return;
+
+                    await _inventoryService.addPurchase(
+                      houseId: widget.houseId,
+                      itemId: selectedItemId,
+                      itemName: itemName,
+                      quantity: quantity,
+                      unit: selectedUnit,
+                      purchasedAt: purchasedAt,
+                      addToStock: addToStock,
+                    );
+
+                    if (!context.mounted) return;
+
+                    Navigator.pop(context);
+                    setState(() => _selectedView = 'purchases');
+                  },
+                  child: const Text("Save Purchase"),
                 ),
               ],
             );
@@ -246,6 +509,227 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  Widget _buildPurchaseHistory() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _inventoryService.purchasesStream(widget.houseId),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return AppErrorState(
+            title: "Could not load purchases",
+            error: snapshot.error,
+            onRetry: () => setState(() {}),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const AppLoadingState(message: "Loading purchases...");
+        }
+
+        final purchases = snapshot.data!.docs;
+
+        if (purchases.isEmpty) {
+          return const AppEmptyState(
+            icon: Icons.receipt_long_outlined,
+            title: "No purchases yet",
+            message: "Add a purchase to track what was bought and by whom.",
+          );
+        }
+
+        return _responsiveInventory(
+          child: ListView.separated(
+            padding: EdgeInsets.symmetric(
+              horizontal: MediaQuery.sizeOf(context).width >= 900 ? 32 : 16,
+              vertical: 16,
+            ),
+            itemCount: purchases.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final data = purchases[index].data();
+              final itemName = data['itemName']?.toString() ?? 'Item';
+              final quantity = (data['quantity'] as num?)?.toInt() ?? 0;
+              final unit = data['unit']?.toString() ?? 'pcs';
+              final boughtBy =
+                  data['boughtByName']?.toString() ??
+                  data['boughtByEmail']?.toString() ??
+                  'House member';
+              final purchasedAt = _timestampText(data['purchasedAt']);
+
+              return Card(
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.shopping_bag_outlined),
+                  ),
+                  title: Text(itemName),
+                  subtitle: Text(
+                    '$quantity $unit\nBought by: $boughtBy\nPurchased: $purchasedAt',
+                  ),
+                  isThreeLine: true,
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStockList(bool isAdmin) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _inventoryService.getItems(widget.houseId),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return AppErrorState(
+            title: "Could not load inventory",
+            error: snapshot.error,
+            onRetry: () => setState(() {}),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const AppLoadingState(message: "Loading inventory...");
+        }
+
+        final items = snapshot.data!.docs;
+
+        if (items.isEmpty) {
+          return const AppEmptyState(
+            icon: Icons.inventory_2_outlined,
+            title: "No inventory items yet",
+            message:
+                "Add groceries, cleaning supplies, or shared household items.",
+          );
+        }
+
+        return _responsiveInventory(
+          child: ListView.separated(
+            padding: EdgeInsets.symmetric(
+              horizontal: MediaQuery.sizeOf(context).width >= 900 ? 32 : 16,
+              vertical: 16,
+            ),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final doc = items[index];
+              final data = doc.data();
+              final name = data['name']?.toString() ?? "Unnamed item";
+              final unit = data['unit']?.toString() ?? "pcs";
+              final quantity = (data['quantity'] as num?)?.toInt() ?? 0;
+              final addedBy =
+                  data['addedByName']?.toString() ??
+                  data['addedByEmail']?.toString() ??
+                  "House member";
+              final updatedBy =
+                  data['updatedByName']?.toString() ??
+                  data['updatedByEmail']?.toString() ??
+                  addedBy;
+              final updatedAt = _timestampText(data['updatedAt']);
+              final colors = Theme.of(context).colorScheme;
+
+              return Card(
+                color: _stockColor(quantity, colors),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        child: Icon(
+                          quantity <= 0
+                              ? Icons.remove_shopping_cart
+                              : Icons.inventory_2,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              "${_stockText(quantity, unit)}\nAdded by: $addedBy\nLast updated: $updatedAt by $updatedBy",
+                            ),
+                            if (quantity <= 1) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                quantity <= 0
+                                    ? "Out of stock"
+                                    : "Low stock warning",
+                                style: TextStyle(
+                                  color: quantity <= 0
+                                      ? colors.error
+                                      : colors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: [
+                                IconButton.outlined(
+                                  tooltip: "Decrease",
+                                  icon: const Icon(Icons.remove),
+                                  onPressed: () =>
+                                      _inventoryService.updateQuantity(
+                                        houseId: widget.houseId,
+                                        itemId: doc.id,
+                                        quantity: quantity - 1,
+                                      ),
+                                ),
+                                IconButton.outlined(
+                                  tooltip: "Increase",
+                                  icon: const Icon(Icons.add),
+                                  onPressed: () =>
+                                      _inventoryService.updateQuantity(
+                                        houseId: widget.houseId,
+                                        itemId: doc.id,
+                                        quantity: quantity + 1,
+                                      ),
+                                ),
+                                IconButton.outlined(
+                                  tooltip: "Edit",
+                                  icon: const Icon(Icons.edit),
+                                  onPressed: () => _showItemDialog(
+                                    itemId: doc.id,
+                                    item: data,
+                                  ),
+                                ),
+                                IconButton.outlined(
+                                  tooltip: "History",
+                                  icon: const Icon(Icons.history),
+                                  onPressed: () =>
+                                      _showHistoryDialog(doc.id, name),
+                                ),
+                                if (isAdmin)
+                                  IconButton.outlined(
+                                    tooltip: "Delete",
+                                    icon: const Icon(Icons.delete),
+                                    onPressed: () => _inventoryService
+                                        .deleteItem(widget.houseId, doc.id),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -268,169 +752,49 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
         return Scaffold(
           backgroundColor: Colors.transparent,
-          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: _inventoryService.getItems(widget.houseId),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return AppErrorState(
-                  title: "Could not load inventory",
-                  error: snapshot.error,
-                  onRetry: () => setState(() {}),
-                );
-              }
-
-              if (!snapshot.hasData) {
-                return const AppLoadingState(message: "Loading inventory...");
-              }
-
-              final items = snapshot.data!.docs;
-
-              if (items.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.inventory_2_outlined,
-                  title: "No inventory items yet",
-                  message:
-                      "Add groceries, cleaning supplies, or shared household items.",
-                );
-              }
-
-              return _responsiveInventory(
-                child: ListView.separated(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: MediaQuery.sizeOf(context).width >= 900
-                        ? 32
-                        : 16,
-                    vertical: 16,
-                  ),
-                  itemCount: items.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final doc = items[index];
-                    final data = doc.data();
-                    final name = data['name']?.toString() ?? "Unnamed item";
-                    final unit = data['unit']?.toString() ?? "pcs";
-                    final quantity = (data['quantity'] as num?)?.toInt() ?? 0;
-                    final addedBy =
-                        data['addedByName']?.toString() ??
-                        data['addedByEmail']?.toString() ??
-                        "House member";
-                    final updatedBy =
-                        data['updatedByName']?.toString() ??
-                        data['updatedByEmail']?.toString() ??
-                        addedBy;
-                    final updatedAt = _timestampText(data['updatedAt']);
-                    final colors = Theme.of(context).colorScheme;
-
-                    return Card(
-                      color: _stockColor(quantity, colors),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            CircleAvatar(
-                              child: Icon(
-                                quantity <= 0
-                                    ? Icons.remove_shopping_cart
-                                    : Icons.inventory_2,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "${_stockText(quantity, unit)}\nAdded by: $addedBy\nLast updated: $updatedAt by $updatedBy",
-                                  ),
-                                  if (quantity <= 1) ...[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      quantity <= 0
-                                          ? "Out of stock"
-                                          : "Low stock warning",
-                                      style: TextStyle(
-                                        color: quantity <= 0
-                                            ? colors.error
-                                            : colors.primary,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 10),
-                                  Wrap(
-                                    spacing: 4,
-                                    runSpacing: 4,
-                                    children: [
-                                      IconButton.outlined(
-                                        tooltip: "Decrease",
-                                        icon: const Icon(Icons.remove),
-                                        onPressed: () =>
-                                            _inventoryService.updateQuantity(
-                                              houseId: widget.houseId,
-                                              itemId: doc.id,
-                                              quantity: quantity - 1,
-                                            ),
-                                      ),
-                                      IconButton.outlined(
-                                        tooltip: "Increase",
-                                        icon: const Icon(Icons.add),
-                                        onPressed: () =>
-                                            _inventoryService.updateQuantity(
-                                              houseId: widget.houseId,
-                                              itemId: doc.id,
-                                              quantity: quantity + 1,
-                                            ),
-                                      ),
-                                      IconButton.outlined(
-                                        tooltip: "Edit",
-                                        icon: const Icon(Icons.edit),
-                                        onPressed: () => _showItemDialog(
-                                          itemId: doc.id,
-                                          item: data,
-                                        ),
-                                      ),
-                                      IconButton.outlined(
-                                        tooltip: "History",
-                                        icon: const Icon(Icons.history),
-                                        onPressed: () =>
-                                            _showHistoryDialog(doc.id, name),
-                                      ),
-                                      if (isAdmin)
-                                        IconButton.outlined(
-                                          tooltip: "Delete",
-                                          icon: const Icon(Icons.delete),
-                                          onPressed: () =>
-                                              _inventoryService.deleteItem(
-                                                widget.houseId,
-                                                doc.id,
-                                              ),
-                                        ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+          body: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 'stock',
+                        label: Text("Stock"),
+                        icon: Icon(Icons.inventory_2_outlined),
                       ),
-                    );
-                  },
+                      ButtonSegment(
+                        value: 'purchases',
+                        label: Text("Purchases"),
+                        icon: Icon(Icons.receipt_long_outlined),
+                      ),
+                    ],
+                    selected: {_selectedView},
+                    onSelectionChanged: (selection) {
+                      setState(() => _selectedView = selection.first);
+                    },
+                  ),
                 ),
-              );
-            },
+              ),
+              Expanded(
+                child: _selectedView == 'stock'
+                    ? _buildStockList(isAdmin)
+                    : _buildPurchaseHistory(),
+              ),
+            ],
           ),
           floatingActionButton: FloatingActionButton.extended(
-            icon: const Icon(Icons.add),
-            label: const Text("Add Item"),
-            onPressed: _showItemDialog,
+            icon: Icon(
+              _selectedView == 'stock'
+                  ? Icons.add
+                  : Icons.add_shopping_cart_outlined,
+            ),
+            label: Text(_selectedView == 'stock' ? "Add Item" : "Add Purchase"),
+            onPressed: _selectedView == 'stock'
+                ? _showItemDialog
+                : _showPurchaseDialog,
           ),
         );
       },

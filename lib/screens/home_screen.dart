@@ -11,7 +11,6 @@ import '../widgets/brand_icon.dart';
 import '../widgets/brand_logo.dart';
 import '../widgets/theme_picker.dart';
 import 'house_dashboard_screen.dart';
-import 'profile_screen.dart';
 import 'qr_scan_screen.dart';
 import 'settings_screen.dart';
 
@@ -25,9 +24,39 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final HouseService _houseService = HouseService();
 
+  static const List<String> _countryOptions = [
+    '🇮🇳 India',
+    '🇩🇪 Germany',
+    '🇺🇸 United States',
+    '🇬🇧 United Kingdom',
+    '🇨🇦 Canada',
+    '🇦🇺 Australia',
+    '🇫🇷 France',
+    '🇪🇸 Spain',
+    '🇮🇹 Italy',
+    '🇳🇱 Netherlands',
+    '🇸🇪 Sweden',
+    '🇳🇴 Norway',
+    '🇩🇰 Denmark',
+    '🇫🇮 Finland',
+    '🇨🇭 Switzerland',
+    '🇦🇹 Austria',
+    '🇮🇪 Ireland',
+    '🇵🇹 Portugal',
+    '🇧🇪 Belgium',
+    '🇵🇱 Poland',
+    '🇧🇷 Brazil',
+    '🇲🇽 Mexico',
+    '🇯🇵 Japan',
+    '🇰🇷 South Korea',
+    '🇸🇬 Singapore',
+    '🇦🇪 United Arab Emirates',
+  ];
+
   final TextEditingController houseNameController = TextEditingController();
   final TextEditingController countryController = TextEditingController();
   final TextEditingController houseIdController = TextEditingController();
+  final FocusNode countryFocusNode = FocusNode();
   bool _isCreatingHouse = false;
   bool _isJoiningHouse = false;
 
@@ -36,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
     houseNameController.dispose();
     countryController.dispose();
     houseIdController.dispose();
+    countryFocusNode.dispose();
     super.dispose();
   }
 
@@ -88,8 +118,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final houseId = await _houseService.joinHouseFromInput(input);
 
-      await _houseService.logActivity(houseId, "joined the house");
-
       houseIdController.clear();
 
       if (!mounted) return;
@@ -125,6 +153,146 @@ class _HomeScreenState extends State<HomeScreen> {
     await _joinHouseWithInput(scannedValue);
   }
 
+  Future<List<_HomeNotificationItem>> _loadHomeNotifications(
+    String userId,
+  ) async {
+    final houses = await FirebaseFirestore.instance
+        .collection('houses')
+        .where('memberIds', arrayContains: userId)
+        .get();
+    final items = <_HomeNotificationItem>[];
+
+    for (final house in houses.docs) {
+      try {
+        final houseData = house.data();
+        final houseName = houseData['name']?.toString() ?? 'House';
+        final notifications = await house.reference
+            .collection('notifications')
+            .orderBy('createdAt', descending: true)
+            .limit(10)
+            .get();
+
+        for (final notification in notifications.docs) {
+          items.add(
+            _HomeNotificationItem(
+              houseId: house.id,
+              houseName: houseName,
+              data: notification.data(),
+            ),
+          );
+        }
+      } catch (e) {
+        // A single house notification read should not break the whole tray.
+        // ignore: avoid_print
+        print("HOME NOTIFICATION READ FAILED: $e");
+      }
+    }
+
+    items.sort((a, b) => b.sortValue.compareTo(a.sortValue));
+
+    return items.take(25).toList();
+  }
+
+  Future<void> _showHomeNotifications(String userId) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) {
+        return SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.72,
+          child: FutureBuilder<List<_HomeNotificationItem>>(
+            future: _loadHomeNotifications(userId),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return AppErrorState(
+                  title: "Could not load notifications",
+                  error: snapshot.error,
+                  onRetry: () => setState(() {}),
+                );
+              }
+
+              if (!snapshot.hasData) {
+                return const AppLoadingState(
+                  message: "Loading notifications...",
+                );
+              }
+
+              final notifications = snapshot.data!;
+
+              if (notifications.isEmpty) {
+                return const AppEmptyState(
+                  icon: Icons.notifications_none,
+                  title: "No notifications yet",
+                  message: "Updates from all your houses will appear here.",
+                );
+              }
+
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                itemCount: notifications.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final item = notifications[index];
+                  final type = item.data['type']?.toString();
+                  final formattedDate = item.createdAt == null
+                      ? 'Just now'
+                      : DateFormat('dd MMM, h:mm a').format(item.createdAt!);
+                  final tabIndex = _notificationTabIndex(type);
+
+                  return ListTile(
+                    leading: CircleAvatar(child: Icon(_notificationIcon(type))),
+                    title: Text(item.data['title'] ?? item.houseName),
+                    subtitle: Text(
+                      "${item.data['message'] ?? 'House update'}\n${item.houseName} - $formattedDate",
+                    ),
+                    isThreeLine: true,
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => HouseDashboardScreen(
+                            houseId: item.houseId,
+                            initialTabIndex: tabIndex,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  IconData _notificationIcon(String? type) {
+    return switch (type) {
+      'task_completed' => Icons.task_alt,
+      'task_assigned' => Icons.assignment_ind,
+      'chat_message' => Icons.chat_bubble_outline,
+      'inventory_added' ||
+      'inventory_low_stock' ||
+      'purchase_added' => Icons.inventory_2_outlined,
+      'member_joined' => Icons.person_add_alt_1,
+      _ => Icons.notifications_outlined,
+    };
+  }
+
+  int _notificationTabIndex(String? type) {
+    return switch (type) {
+      'chat_message' => 1,
+      'task_assigned' || 'task_completed' => 2,
+      'inventory_added' || 'inventory_low_stock' || 'purchase_added' => 3,
+      'member_joined' => 4,
+      _ => 0,
+    };
+  }
+
   String _initialsFromMember(Map<String, dynamic> member) {
     final displayName = (member['displayName'] ?? '').toString().trim();
     final email = (member['email'] ?? '').toString().trim();
@@ -157,6 +325,69 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Iterable<String> _countrySuggestions(TextEditingValue value) {
+    final query = value.text.trim().toLowerCase();
+
+    if (query.isEmpty) return _countryOptions.take(10);
+
+    return _countryOptions
+        .where((country) => country.toLowerCase().contains(query))
+        .take(12);
+  }
+
+  Widget _countryPicker() {
+    return RawAutocomplete<String>(
+      textEditingController: countryController,
+      focusNode: countryFocusNode,
+      optionsBuilder: _countrySuggestions,
+      onSelected: (value) {
+        countryController.text = value;
+      },
+      fieldViewBuilder:
+          (context, textEditingController, focusNode, onFieldSubmitted) {
+            return TextField(
+              controller: textEditingController,
+              focusNode: focusNode,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: "Country",
+                prefixIcon: Icon(Icons.flag_outlined),
+              ),
+            );
+          },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 260),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (context, index) {
+                  final option = options.elementAt(index);
+                  final parts = option.split(' ');
+                  final flag = parts.first;
+                  final countryName = parts.skip(1).join(' ');
+
+                  return ListTile(
+                    dense: true,
+                    leading: Text(flag, style: const TextStyle(fontSize: 20)),
+                    title: Text(countryName),
+                    onTap: () => onSelected(option),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -183,41 +414,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: "Notifications",
+            icon: const Icon(Icons.notifications_outlined),
+            onPressed: () => _showHomeNotifications(user.uid),
+          ),
           const ThemePickerButton(),
-          PopupMenuButton<String>(
-            tooltip: "More",
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              if (value == 'profile') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                );
-              }
-
-              if (value == 'settings') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              }
+          IconButton(
+            tooltip: "Settings",
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'profile',
-                child: ListTile(
-                  leading: Icon(Icons.person),
-                  title: Text("Profile"),
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: ListTile(
-                  leading: Icon(Icons.settings),
-                  title: Text("Settings"),
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -244,13 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            TextField(
-                              controller: countryController,
-                              textCapitalization: TextCapitalization.words,
-                              decoration: const InputDecoration(
-                                labelText: "Country",
-                              ),
-                            ),
+                            _countryPicker(),
                             const SizedBox(height: 10),
                             ElevatedButton.icon(
                               icon: _brandIcon(
@@ -471,5 +676,29 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     );
+  }
+}
+
+class _HomeNotificationItem {
+  final String houseId;
+  final String houseName;
+  final Map<String, dynamic> data;
+
+  const _HomeNotificationItem({
+    required this.houseId,
+    required this.houseName,
+    required this.data,
+  });
+
+  DateTime? get createdAt {
+    final value = data['createdAt'];
+
+    if (value is Timestamp) return value.toDate();
+
+    return null;
+  }
+
+  int get sortValue {
+    return createdAt?.millisecondsSinceEpoch ?? 0;
   }
 }

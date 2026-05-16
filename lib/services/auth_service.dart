@@ -49,6 +49,36 @@ class AuthService {
     }
   }
 
+  Future<void> updateDisplayName(String displayName) async {
+    final user = _auth.currentUser;
+    final name = displayName.trim();
+
+    if (user == null) {
+      throw Exception("User not logged in");
+    }
+
+    if (name.isEmpty) {
+      throw Exception("Display name cannot be empty");
+    }
+
+    await user.updateDisplayName(name);
+    await user.reload();
+
+    try {
+      await _firestore.collection('users').doc(user.uid).set({
+        'uid': user.uid,
+        'email': user.email,
+        'displayName': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      // Auth display name updated successfully. Firestore profile metadata can
+      // be retried after users/{uid} write rules are added.
+      // ignore: avoid_print
+      print("PROFILE NAME SAVE FAILED: $e");
+    }
+  }
+
   Future<User?> signUp({
     required String name,
     required String email,
@@ -70,6 +100,7 @@ class AuthService {
       await _firestore.collection('users').doc(user.uid).set({
         'uid': user.uid,
         'name': name,
+        'displayName': name,
         'email': email,
         'createdAt': FieldValue.serverTimestamp(),
       });
