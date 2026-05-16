@@ -5,6 +5,54 @@ class HouseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  DocumentReference<Map<String, dynamic>> houseRef(String houseId) {
+    return _firestore.collection('houses').doc(houseId);
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> userHousesStream(String userId) {
+    return _firestore
+        .collection('houses')
+        .where('memberIds', arrayContains: userId)
+        .snapshots();
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> houseStream(String houseId) {
+    return houseRef(houseId).snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> membersStream(String houseId) {
+    return houseRef(houseId).collection('members').snapshots();
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> memberStream(
+    String houseId,
+    String userId,
+  ) {
+    return houseRef(houseId).collection('members').doc(userId).snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> activityStream(String houseId) {
+    return houseRef(
+      houseId,
+    ).collection('activity').orderBy('timestamp', descending: true).snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> messagesStream(String houseId) {
+    return houseRef(
+      houseId,
+    ).collection('messages').orderBy('timestamp', descending: true).snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> notificationsStream(
+    String houseId,
+  ) {
+    return houseRef(houseId)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .limit(25)
+        .snapshots();
+  }
+
   Future<String> createHouse(String name) async {
     final user = _auth.currentUser;
 
@@ -40,6 +88,7 @@ class HouseService {
       'role': 'admin',
       'email': user.email ?? "unknown",
       'displayName': user.displayName ?? "Unknown member",
+      'photoUrl': user.photoURL,
       'joinedAt': FieldValue.serverTimestamp(),
     });
 
@@ -61,7 +110,7 @@ class HouseService {
       throw Exception("User not logged in");
     }
 
-    final houseRef = _firestore.collection('houses').doc(houseId);
+    final houseRef = this.houseRef(houseId);
 
     final houseDoc = await houseRef.get();
 
@@ -92,6 +141,7 @@ class HouseService {
       'role': 'member',
       'email': user.email ?? "unknown",
       'displayName': user.displayName ?? "Unknown member",
+      'photoUrl': user.photoURL,
       'joinedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -119,37 +169,99 @@ class HouseService {
         });
   }
 
-  Future<void> addTask(String houseId, String title) async {
+  Future<void> deleteHouse(String houseId) {
+    return houseRef(houseId).delete();
+  }
+
+  Future<void> updateCurrentMemberAvatar(
+    String houseId,
+    String imageUrl,
+  ) async {
     final user = _auth.currentUser;
 
     if (user == null) {
       throw Exception("User not logged in");
     }
 
-    final taskTitle = title.trim();
+    await houseRef(
+      houseId,
+    ).collection('members').doc(user.uid).update({'photoUrl': imageUrl});
+  }
 
-    if (taskTitle.isEmpty) return;
+  Future<void> updateAvatarAcrossMemberships(String imageUrl) async {
+    final user = _auth.currentUser;
 
-    await _firestore.collection('houses').doc(houseId).collection('tasks').add({
-      'title': taskTitle,
-      'assignedTo': user.uid,
-      'assignedEmail': user.email ?? "",
-      'isDone': false,
+    if (user == null) {
+      throw Exception("User not logged in");
+    }
+
+    final houses = await _firestore
+        .collection('houses')
+        .where('memberIds', arrayContains: user.uid)
+        .get();
+
+    final batch = _firestore.batch();
+
+    for (final house in houses.docs) {
+      batch.set(
+        house.reference.collection('members').doc(user.uid),
+        {'photoUrl': imageUrl},
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> sendEmailInvite(String houseId, String email) async {
+    final inviteEmail = email.trim();
+
+    if (inviteEmail.isEmpty) return;
+
+    final inviteLink = "https://easylivaign.app/join/$houseId";
+
+    await _firestore.collection('mail').add({
+      'to': [inviteEmail],
+      'message': {
+        'subject': 'Join my house on Easy LivAIgn',
+        'text':
+            '''
+You have been invited to join a house on Easy LivAIgn.
+
+Invite link: $inviteLink
+''',
+        'html':
+            '''
+<p>You have been invited to join a house on <b>Easy LivAIgn</b>.</p>
+<p><a href="$inviteLink">Join the house</a></p>
+''',
+      },
+      'createdAt': FieldValue.serverTimestamp(),
+      'houseId': houseId,
+      'type': 'house_invite',
+    });
+
+    await houseRef(houseId).collection('invites').add({
+      'type': 'email',
+      'email': inviteEmail,
+      'houseId': houseId,
+      'status': 'sent',
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
-  Future<void> toggleTask(
-    String houseId,
-    String taskId,
-    bool currentValue,
-  ) async {
-    await _firestore
-        .collection('houses')
-        .doc(houseId)
-        .collection('tasks')
-        .doc(taskId)
-        .update({'isDone': !currentValue});
+  Future<void> createPhoneInvite(String houseId, String phone) async {
+    final invitePhone = phone.trim();
+
+    if (invitePhone.isEmpty) return;
+
+    await houseRef(houseId).collection('invites').add({
+      'type': 'phone',
+      'phone': invitePhone,
+      'houseId': houseId,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> logActivity(String houseId, String action) async {

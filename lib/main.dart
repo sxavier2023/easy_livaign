@@ -3,13 +3,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 import 'package:easy_livaign/screens/home_screen.dart';
+import 'package:easy_livaign/screens/landing_screen.dart';
 import 'package:easy_livaign/screens/login_screen.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const MyApp());
 }
@@ -20,11 +20,13 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-  debugShowCheckedModeBanner: false,
-  initialRoute: '/login',
-  routes: {
-    '/login': (context) => const LoginScreen(),
-'/home': (context) => HomeScreen(),  },
-);
+      debugShowCheckedModeBanner: false,
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const LandingScreen(),
+        '/login': (context) => const LoginScreen(),
+        '/home': (context) => const HomeScreen(),
+      },
+    );
   }
 }
