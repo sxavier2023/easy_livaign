@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../services/inventory_service.dart';
 import '../services/rbac_service.dart';
@@ -134,6 +135,103 @@ class _InventoryScreenState extends State<InventoryScreen> {
     return "$quantity $unit";
   }
 
+  String _timestampText(Object? value) {
+    if (value is Timestamp) {
+      return DateFormat('dd MMM yyyy, HH:mm').format(value.toDate());
+    }
+
+    return 'Not updated yet';
+  }
+
+  String _historyMessage(Map<String, dynamic> data) {
+    final action = data['action']?.toString() ?? 'updated';
+    final itemName = data['itemName']?.toString() ?? 'Item';
+    final unit = data['unit']?.toString() ?? '';
+    final oldQuantity = data['oldQuantity'];
+    final newQuantity = data['newQuantity'];
+
+    if (oldQuantity != null && newQuantity != null) {
+      return '$itemName $action from $oldQuantity to $newQuantity $unit';
+    }
+
+    if (newQuantity != null) {
+      return '$itemName $action with $newQuantity $unit';
+    }
+
+    return '$itemName $action';
+  }
+
+  Future<void> _showHistoryDialog(String itemId, String itemName) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text("$itemName History"),
+          content: SizedBox(
+            width: 420,
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _inventoryService.itemHistoryStream(
+                widget.houseId,
+                itemId,
+              ),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return AppErrorState(
+                    title: "Could not load history",
+                    error: snapshot.error,
+                  );
+                }
+
+                if (!snapshot.hasData) {
+                  return const AppLoadingState(message: "Loading history...");
+                }
+
+                final history = snapshot.data!.docs;
+
+                if (history.isEmpty) {
+                  return const AppEmptyState(
+                    icon: Icons.history,
+                    title: "No history yet",
+                    message: "Quantity and edit changes will appear here.",
+                  );
+                }
+
+                return SizedBox(
+                  height: 340,
+                  child: ListView.separated(
+                    itemCount: history.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final data = history[index].data();
+                      final updatedBy =
+                          data['updatedByName']?.toString() ??
+                          data['updatedByEmail']?.toString() ??
+                          'House member';
+
+                      return ListTile(
+                        leading: const Icon(Icons.history),
+                        title: Text(_historyMessage(data)),
+                        subtitle: Text(
+                          '$updatedBy - ${_timestampText(data['createdAt'])}',
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _responsiveInventory({required Widget child}) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -169,6 +267,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         final isAdmin = RbacService.isAdmin(member);
 
         return Scaffold(
+          backgroundColor: Colors.transparent,
           body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _inventoryService.getItems(widget.houseId),
             builder: (context, snapshot) {
@@ -215,6 +314,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         data['addedByName']?.toString() ??
                         data['addedByEmail']?.toString() ??
                         "House member";
+                    final updatedBy =
+                        data['updatedByName']?.toString() ??
+                        data['updatedByEmail']?.toString() ??
+                        addedBy;
+                    final updatedAt = _timestampText(data['updatedAt']);
                     final colors = Theme.of(context).colorScheme;
 
                     return Card(
@@ -244,8 +348,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    "${_stockText(quantity, unit)}\nAdded by: $addedBy",
+                                    "${_stockText(quantity, unit)}\nAdded by: $addedBy\nLast updated: $updatedAt by $updatedBy",
                                   ),
+                                  if (quantity <= 1) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      quantity <= 0
+                                          ? "Out of stock"
+                                          : "Low stock warning",
+                                      style: TextStyle(
+                                        color: quantity <= 0
+                                            ? colors.error
+                                            : colors.primary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                   const SizedBox(height: 10),
                                   Wrap(
                                     spacing: 4,
@@ -278,6 +396,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                           itemId: doc.id,
                                           item: data,
                                         ),
+                                      ),
+                                      IconButton.outlined(
+                                        tooltip: "History",
+                                        icon: const Icon(Icons.history),
+                                        onPressed: () =>
+                                            _showHistoryDialog(doc.id, name),
                                       ),
                                       if (isAdmin)
                                         IconButton.outlined(

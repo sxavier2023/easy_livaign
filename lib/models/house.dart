@@ -12,12 +12,7 @@ class House {
   });
 
   Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'ownerId': ownerId,
-      'members': members,
-    };
+    return {'id': id, 'name': name, 'ownerId': ownerId, 'members': members};
   }
 
   static House fromMap(Map<String, dynamic> map) {

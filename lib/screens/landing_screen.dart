@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../widgets/brand_logo.dart';
@@ -45,14 +47,13 @@ class _LandingScreenState extends State<LandingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final logoAnimation = _interval(0.45, 0.8);
+    final logoAnimation = _interval(0.18, 0.72);
     final buttonAnimation = _interval(0.72, 1);
-
     return Scaffold(
-      body: Container(
+      backgroundColor: Colors.transparent,
+      body: SizedBox(
         width: double.infinity,
         height: double.infinity,
-        color: const Color(0xFFF8FAFC),
         child: SafeArea(
           child: Center(
             child: Column(
@@ -65,33 +66,10 @@ class _LandingScreenState extends State<LandingScreen>
                     alignment: Alignment.center,
                     children: [
                       const _SoftRing(),
-                      _AnimatedHandPair(
-                        animation: _interval(0, 0.55),
-                        begin: const Offset(-120, -86),
-                        end: const Offset(-44, -34),
-                        rotate: -0.7,
-                      ),
-                      _AnimatedHandPair(
-                        animation: _interval(0.08, 0.63),
-                        begin: const Offset(120, -86),
-                        end: const Offset(44, -34),
-                        rotate: 0.7,
-                      ),
-                      _AnimatedHandPair(
-                        animation: _interval(0.16, 0.71),
-                        begin: const Offset(-120, 86),
-                        end: const Offset(-44, 34),
-                        rotate: -2.4,
-                      ),
-                      _AnimatedHandPair(
-                        animation: _interval(0.24, 0.79),
-                        begin: const Offset(120, 86),
-                        end: const Offset(44, 34),
-                        rotate: 2.4,
-                      ),
+                      _OrbitDots(animation: _controller),
                       ScaleTransition(
                         scale: Tween<double>(
-                          begin: 0.7,
+                          begin: 0.62,
                           end: 1,
                         ).animate(logoAnimation),
                         child: FadeTransition(
@@ -107,11 +85,7 @@ class _LandingScreenState extends State<LandingScreen>
                   opacity: logoAnimation,
                   child: const Text(
                     "Easy LivAIgn",
-                    style: TextStyle(
-                      fontSize: 34,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF172033),
-                    ),
+                    style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
                   ),
                 ),
                 const SizedBox(height: 22),
@@ -144,45 +118,53 @@ class _LandingScreenState extends State<LandingScreen>
   }
 }
 
-class _AnimatedHandPair extends StatelessWidget {
+class _OrbitDots extends StatelessWidget {
   final Animation<double> animation;
-  final Offset begin;
-  final Offset end;
-  final double rotate;
 
-  const _AnimatedHandPair({
-    required this.animation,
-    required this.begin,
-    required this.end,
-    required this.rotate,
-  });
+  const _OrbitDots({required this.animation});
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    const dots = [
+      (Color(0xFF55BF91), 0.0),
+      (Color(0xFFF7AD3D), 1.57),
+      (Color(0xFF6B58D8), 3.14),
+      (Color(0xFF4F7DDD), 4.71),
+    ];
 
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
-        final offset = Offset.lerp(begin, end, animation.value)!;
-        final opacity = animation.value.clamp(0.0, 1.0);
+        final progress = Curves.easeOutCubic.transform(animation.value);
+        final radius = 92 - (18 * progress);
 
-        return Opacity(
-          opacity: opacity,
-          child: Transform.translate(
-            offset: offset,
-            child: Transform.rotate(
-              angle: rotate,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.back_hand, size: 28, color: colors.primary),
-                  const SizedBox(width: 5),
-                  Icon(Icons.back_hand, size: 28, color: colors.tertiary),
-                ],
+        return Stack(
+          alignment: Alignment.center,
+          children: dots.map((dot) {
+            final angle = dot.$2 + (animation.value * 1.4);
+
+            return Transform.translate(
+              offset: Offset(
+                radius * math.sin(angle),
+                radius * math.cos(angle),
               ),
-            ),
-          ),
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: dot.$1,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: dot.$1.withValues(alpha: 0.28),
+                      blurRadius: 14,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
         );
       },
     );
@@ -194,12 +176,14 @@ class _SoftRing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
     return Container(
       width: 220,
       height: 220,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFFE2E8F0), width: 1.5),
+        border: Border.all(color: colors.outlineVariant, width: 1.5),
       ),
     );
   }

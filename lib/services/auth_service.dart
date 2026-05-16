@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'notification_service.dart';
+
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -12,6 +14,8 @@ class AuthService {
       email: email,
       password: password,
     );
+
+    await NotificationService().registerCurrentUserToken();
 
     return result.user;
   }
@@ -74,6 +78,8 @@ class AuthService {
       // ignore: avoid_print
       print("PROFILE SAVE FAILED AFTER SIGNUP: $e");
     }
+
+    await NotificationService().registerCurrentUserToken();
 
     return user;
   }

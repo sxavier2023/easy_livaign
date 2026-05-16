@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'notification_service.dart';
+
 class TaskService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -149,10 +151,6 @@ class TaskService {
     return _db.collection('houses').doc(houseId).collection('tasks');
   }
 
-  CollectionReference<Map<String, dynamic>> _notificationsRef(String houseId) {
-    return _db.collection('houses').doc(houseId).collection('notifications');
-  }
-
   String _statusFromTask(Map<String, dynamic> task) {
     final status = task['status']?.toString();
 
@@ -169,23 +167,13 @@ class TaskService {
     required String taskId,
     String? userId,
   }) async {
-    final user = _auth.currentUser;
-
-    try {
-      await _notificationsRef(houseId).add({
-        'type': type,
-        'title': title,
-        'message': message,
-        'taskId': taskId,
-        'userId': userId,
-        'createdBy': user?.uid,
-        'createdAt': FieldValue.serverTimestamp(),
-        'read': false,
-      });
-    } catch (e) {
-      // Notification writes should not block the task action itself.
-      // ignore: avoid_print
-      print("TASK NOTIFICATION FAILED: $e");
-    }
+    await NotificationService().createHouseNotification(
+      houseId: houseId,
+      type: type,
+      title: title,
+      message: message,
+      targetUserId: userId,
+      data: {'taskId': taskId},
+    );
   }
 }

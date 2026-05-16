@@ -1,7 +1,9 @@
 import 'package:easy_livaign/screens/home_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/auth_service.dart';
+import '../widgets/app_panel.dart';
 import '../widgets/brand_logo.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -18,6 +20,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool isSignUp = false;
   bool _isSubmitting = false;
+  bool _rememberCredentials = false;
+
+  static const _savedEmailKey = 'saved_login_email';
+  static const _savedPasswordKey = 'saved_login_password';
+  static const _rememberLoginKey = 'remember_login';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
 
   @override
   void dispose() {
@@ -41,6 +54,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (user == null) return;
+
+      await _saveCredentialsPreference();
 
       if (!mounted) return;
 
@@ -91,6 +106,8 @@ class _LoginScreenState extends State<LoginScreen> {
         throw Exception("Could not create user");
       }
 
+      await _saveCredentialsPreference();
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,11 +129,42 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final remember = prefs.getBool(_rememberLoginKey) ?? false;
+
+    if (!mounted) return;
+
+    setState(() {
+      _rememberCredentials = remember;
+      if (remember) {
+        emailController.text = prefs.getString(_savedEmailKey) ?? '';
+        passwordController.text = prefs.getString(_savedPasswordKey) ?? '';
+      }
+    });
+  }
+
+  Future<void> _saveCredentialsPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setBool(_rememberLoginKey, _rememberCredentials);
+
+    if (_rememberCredentials) {
+      await prefs.setString(_savedEmailKey, emailController.text.trim());
+      await prefs.setString(_savedPasswordKey, passwordController.text);
+      return;
+    }
+
+    await prefs.remove(_savedEmailKey);
+    await prefs.remove(_savedPasswordKey);
+  }
+
   @override
   Widget build(BuildContext context) {
     final actionText = isSignUp ? "Create Account" : "Login";
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(title: Text(isSignUp ? "Sign Up" : "Login")),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -128,71 +176,86 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _DoodleAuthFrame(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Center(child: BrandLogo(width: 76)),
-                        const SizedBox(height: 18),
-                        if (isSignUp) ...[
+                    child: AppPanel(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Center(child: BrandLogo(width: 76)),
+                          const SizedBox(height: 18),
+                          if (isSignUp) ...[
+                            TextField(
+                              controller: nameController,
+                              decoration: const InputDecoration(
+                                labelText: "Name",
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
                           TextField(
-                            controller: nameController,
+                            controller: emailController,
+                            keyboardType: TextInputType.emailAddress,
                             decoration: const InputDecoration(
-                              labelText: "Name",
-                              border: OutlineInputBorder(),
+                              labelText: "Email",
                             ),
                           ),
                           const SizedBox(height: 10),
+                          TextField(
+                            controller: passwordController,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: "Password",
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          CheckboxListTile(
+                            value: _rememberCredentials,
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: const Text("Remember ID and password"),
+                            onChanged: _isSubmitting
+                                ? null
+                                : (value) {
+                                    setState(
+                                      () =>
+                                          _rememberCredentials = value ?? false,
+                                    );
+                                  },
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton(
+                            onPressed: _isSubmitting
+                                ? null
+                                : isSignUp
+                                ? _signUp
+                                : _login,
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(actionText),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: _isSubmitting
+                                ? null
+                                : () {
+                                    setState(() {
+                                      isSignUp = !isSignUp;
+                                    });
+                                  },
+                            child: Text(
+                              isSignUp
+                                  ? "Already have an account? Login"
+                                  : "Don't have an account? Sign Up",
+                            ),
+                          ),
                         ],
-                        TextField(
-                          controller: emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(
-                            labelText: "Email",
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: passwordController,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: "Password",
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        FilledButton(
-                          onPressed: _isSubmitting
-                              ? null
-                              : isSignUp
-                              ? _signUp
-                              : _login,
-                          child: _isSubmitting
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Text(actionText),
-                        ),
-                        const SizedBox(height: 12),
-                        TextButton(
-                          onPressed: _isSubmitting
-                              ? null
-                              : () {
-                                  setState(() {
-                                    isSignUp = !isSignUp;
-                                  });
-                                },
-                          child: Text(
-                            isSignUp
-                                ? "Already have an account? Login"
-                                : "Don't have an account? Sign Up",
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ],

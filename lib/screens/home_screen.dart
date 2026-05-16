@@ -6,10 +6,13 @@ import 'package:flutter/material.dart';
 import '../services/house_service.dart';
 import '../services/rbac_service.dart';
 import '../widgets/app_state.dart';
+import '../widgets/app_panel.dart';
 import '../widgets/brand_icon.dart';
 import '../widgets/brand_logo.dart';
+import '../widgets/theme_picker.dart';
 import 'house_dashboard_screen.dart';
 import 'profile_screen.dart';
+import 'qr_scan_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final HouseService _houseService = HouseService();
 
   final TextEditingController houseNameController = TextEditingController();
+  final TextEditingController countryController = TextEditingController();
   final TextEditingController houseIdController = TextEditingController();
   bool _isCreatingHouse = false;
   bool _isJoiningHouse = false;
@@ -30,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     houseNameController.dispose();
+    countryController.dispose();
     houseIdController.dispose();
     super.dispose();
   }
@@ -73,6 +78,51 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text("House deleted")));
+  }
+
+  Future<void> _joinHouseWithInput(String input) async {
+    if (input.trim().isEmpty || _isJoiningHouse) return;
+
+    try {
+      setState(() => _isJoiningHouse = true);
+
+      final houseId = await _houseService.joinHouseFromInput(input);
+
+      await _houseService.logActivity(houseId, "joined the house");
+
+      houseIdController.clear();
+
+      if (!mounted) return;
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HouseDashboardScreen(houseId: houseId),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+    } finally {
+      if (mounted) {
+        setState(() => _isJoiningHouse = false);
+      }
+    }
+  }
+
+  Future<void> _scanInviteQr() async {
+    final scannedValue = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const QrScanScreen()),
+    );
+
+    if (scannedValue == null || scannedValue.trim().isEmpty) return;
+
+    houseIdController.text = scannedValue;
+    await _joinHouseWithInput(scannedValue);
   }
 
   String _initialsFromMember(Map<String, dynamic> member) {
@@ -122,6 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -132,31 +183,41 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: _brandIcon(
-              'assets/brand/icons/people.svg',
-              fallback: Icons.person,
-            ),
-            tooltip: "Profile",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              );
+          const ThemePickerButton(),
+          PopupMenuButton<String>(
+            tooltip: "More",
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'profile') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                );
+              }
+
+              if (value == 'settings') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              }
             },
-          ),
-          IconButton(
-            icon: _brandIcon(
-              'assets/brand/icons/settings.svg',
-              fallback: Icons.settings,
-            ),
-            tooltip: "Settings",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profile',
+                child: ListTile(
+                  leading: Icon(Icons.person),
+                  title: Text("Profile"),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings),
+                  title: Text("Settings"),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -168,74 +229,101 @@ class _HomeScreenState extends State<HomeScreen> {
               constraints: const BoxConstraints(maxWidth: 860),
               child: Padding(
                 padding: _pagePadding(constraints.maxWidth),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: houseNameController,
-                      decoration: const InputDecoration(
-                        labelText: "Create House Name",
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      icon: _brandIcon(
-                        'assets/brand/icons/home.svg',
-                        size: 20,
-                        fallback: Icons.home,
-                      ),
-                      onPressed: () async {
-                        try {
-                          final name = houseNameController.text.trim();
-
-                          if (name.isEmpty || _isCreatingHouse) return;
-
-                          setState(() => _isCreatingHouse = true);
-
-                          final houseId = await _houseService.createHouse(name);
-
-                          await _houseService.logActivity(
-                            houseId,
-                            "created the house",
-                          );
-
-                          houseNameController.clear();
-
-                          if (!context.mounted) return;
-
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  HouseDashboardScreen(houseId: houseId),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AppPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: houseNameController,
+                              decoration: const InputDecoration(
+                                labelText: "Create House Name",
+                              ),
                             ),
-                          );
-                        } catch (e) {
-                          if (!context.mounted) return;
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: countryController,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: const InputDecoration(
+                                labelText: "Country",
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ElevatedButton.icon(
+                              icon: _brandIcon(
+                                'assets/brand/icons/home.svg',
+                                size: 20,
+                                fallback: Icons.home,
+                              ),
+                              onPressed: () async {
+                                try {
+                                  final name = houseNameController.text.trim();
 
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text("Error: $e")));
-                        } finally {
-                          if (mounted) setState(() => _isCreatingHouse = false);
-                        }
-                      },
-                      label: Text(
-                        _isCreatingHouse ? "Creating..." : "Create House",
+                                  if (name.isEmpty || _isCreatingHouse) return;
+
+                                  setState(() => _isCreatingHouse = true);
+
+                                  final houseId = await _houseService
+                                      .createHouse(
+                                        name: name,
+                                        country: countryController.text,
+                                        city: '',
+                                        postCode: '',
+                                        address: '',
+                                      );
+
+                                  await _houseService.logActivity(
+                                    houseId,
+                                    "created the house",
+                                  );
+
+                                  houseNameController.clear();
+                                  countryController.clear();
+
+                                  if (!context.mounted) return;
+
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => HouseDashboardScreen(
+                                        houseId: houseId,
+                                      ),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  if (!context.mounted) return;
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Error: $e")),
+                                  );
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isCreatingHouse = false);
+                                  }
+                                }
+                              },
+                              label: Text(
+                                _isCreatingHouse
+                                    ? "Creating..."
+                                    : "Create House",
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      "My Houses",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: 24),
+                      const Text(
+                        "My Houses",
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      const SizedBox(height: 12),
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                         stream: _houseService.userHousesStream(user.uid),
                         builder: (context, snapshot) {
                           if (snapshot.hasError) {
@@ -263,12 +351,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             );
                           }
 
-                          return ListView.separated(
-                            itemCount: houses.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 8),
-                            itemBuilder: (context, index) {
-                              final house = houses[index];
+                          return Column(
+                            children: houses.map((house) {
                               final data = house.data();
                               final name = data['name'] ?? 'Unnamed House';
 
@@ -338,68 +422,48 @@ class _HomeScreenState extends State<HomeScreen> {
                                       },
                                     ),
                               );
-                            },
+                            }).toList(),
                           );
                         },
                       ),
-                    ),
-                    const Divider(),
-                    TextField(
-                      controller: houseIdController,
-                      decoration: const InputDecoration(
-                        labelText: "Enter Invite Link",
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      icon: _brandIcon(
-                        'assets/brand/icons/people.svg',
-                        size: 20,
-                        fallback: Icons.group_add,
-                      ),
-                      onPressed: () async {
-                        try {
-                          final input = houseIdController.text.trim();
-
-                          if (input.isEmpty || _isJoiningHouse) return;
-
-                          setState(() => _isJoiningHouse = true);
-
-                          final houseId = await _houseService
-                              .joinHouseFromInput(input);
-
-                          await _houseService.logActivity(
-                            houseId,
-                            "joined the house",
-                          );
-
-                          houseIdController.clear();
-
-                          if (!context.mounted) return;
-
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  HouseDashboardScreen(houseId: houseId),
+                      const Divider(),
+                      AppPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: houseIdController,
+                              decoration: const InputDecoration(
+                                labelText: "Enter Invite Link or Code",
+                              ),
                             ),
-                          );
-                        } catch (e) {
-                          if (!context.mounted) return;
-
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text("Error: $e")));
-                        } finally {
-                          if (mounted) setState(() => _isJoiningHouse = false);
-                        }
-                      },
-                      label: Text(
-                        _isJoiningHouse ? "Joining..." : "Join House",
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              icon: _brandIcon(
+                                'assets/brand/icons/people.svg',
+                                size: 20,
+                                fallback: Icons.group_add,
+                              ),
+                              onPressed: () async {
+                                await _joinHouseWithInput(
+                                  houseIdController.text.trim(),
+                                );
+                              },
+                              label: Text(
+                                _isJoiningHouse ? "Joining..." : "Join House",
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.qr_code_scanner),
+                              label: const Text("Scan Invite QR"),
+                              onPressed: _isJoiningHouse ? null : _scanInviteQr,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

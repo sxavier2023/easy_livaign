@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/avatar_service.dart';
 import '../services/auth_service.dart';
@@ -11,6 +14,7 @@ import '../services/rbac_service.dart';
 import '../services/task_service.dart';
 import '../widgets/app_state.dart';
 import '../widgets/brand_icon.dart';
+import '../widgets/theme_picker.dart';
 import 'inventory_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
@@ -34,6 +38,8 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
   final HouseService _houseService = HouseService();
   final AvatarService _avatarService = AvatarService();
   final AuthService _authService = AuthService();
+  final TaskService _taskService = TaskService();
+  final Set<String> _seenOverviewHighlights = {};
 
   DocumentReference<Map<String, dynamic>> get houseRef =>
       _houseService.houseRef(widget.houseId);
@@ -53,25 +59,73 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
   }
 
   Future<void> _copyInviteLink() async {
-    final link = "https://easylivaign.app/join/${widget.houseId}";
+    try {
+      final link = await _houseService.inviteLinkForHouse(widget.houseId);
 
-    await Clipboard.setData(ClipboardData(text: link));
+      await Clipboard.setData(ClipboardData(text: link));
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Invite link copied")));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Invite link copied")));
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Invite Error: $e")));
+    }
   }
 
-  Future<void> _joinCurrentUserToHouse() async {
-    await _houseService.joinHouse(widget.houseId);
+  Future<void> _showInviteQr() async {
+    try {
+      final link = await _houseService.inviteLinkForHouse(widget.houseId);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Joined house")));
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text("Invite QR Code"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                QrImageView(data: link, size: 240),
+                const SizedBox(height: 12),
+                SelectableText(
+                  link,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Close"),
+              ),
+              FilledButton.icon(
+                icon: const Icon(Icons.copy),
+                label: const Text("Copy Link"),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: link));
+
+                  if (context.mounted) Navigator.pop(context);
+                },
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Invite QR Error: $e")));
+    }
   }
 
   Future<void> _sendEmailInvite() async {
@@ -185,6 +239,123 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
     );
   }
 
+  bool _hasRecentActivity(
+    QuerySnapshot<Map<String, dynamic>>? snapshot, {
+    String primaryField = 'updatedAt',
+    String fallbackField = 'createdAt',
+  }) {
+    if (snapshot == null || snapshot.docs.isEmpty) return false;
+
+    for (final doc in snapshot.docs.take(3)) {
+      final data = doc.data();
+      final timestamp = data[primaryField] ?? data[fallbackField];
+
+      if (timestamp is Timestamp) {
+        final age = DateTime.now().difference(timestamp.toDate());
+
+        if (age.inHours < 24) return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool _shouldHighlightOverview(String key, bool hasRecentActivity) {
+    return hasRecentActivity && !_seenOverviewHighlights.contains(key);
+  }
+
+  void _openOverviewTarget(String key, int tabIndex) {
+    setState(() => _seenOverviewHighlights.add(key));
+    _tabController.animateTo(tabIndex);
+  }
+
+  void _openActivity(Map<String, dynamic> data) {
+    final text =
+        '${data['type'] ?? ''} ${data['action'] ?? ''} '
+                '${data['message'] ?? ''}'
+            .toLowerCase();
+
+    if (text.contains('chat') || text.contains('message')) {
+      _openOverviewTarget('chat', 1);
+      return;
+    }
+
+    if (text.contains('task')) {
+      _openOverviewTarget('tasks', 2);
+      return;
+    }
+
+    if (text.contains('inventory') || text.contains('stock')) {
+      _openOverviewTarget('inventory', 3);
+      return;
+    }
+
+    _openOverviewTarget('people', 4);
+  }
+
+  Widget _adminAnalyticsPanel({
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> members,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> tasks,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> inventory,
+  }) {
+    final doneTasks = tasks.where((task) {
+      final data = task.data();
+      return data['status'] == 'done' || data['isDone'] == true;
+    }).length;
+    final openTasks = tasks.length - doneTasks;
+    final lowStock = inventory.where((item) {
+      final quantity = (item.data()['quantity'] as num?)?.toInt() ?? 0;
+      return quantity <= 1;
+    }).length;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Admin Analytics",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _metricChip("Members", members.length.toString()),
+                _metricChip("Open tasks", openTasks.toString()),
+                _metricChip("Completed", doneTasks.toString()),
+                _metricChip("Low stock", lowStock.toString()),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _metricChip(String label, String value) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label),
+          const SizedBox(width: 8),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   Widget _buildOverviewTab() {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _houseService.houseStream(widget.houseId),
@@ -211,7 +382,6 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
           );
         }
 
-        final taskCount = data['taskCount'] ?? 0;
         return _responsiveContent(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,7 +399,6 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
               StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: _houseService.membersStream(widget.houseId),
                 builder: (context, memberSnapshot) {
-                  final memberCount = memberSnapshot.data?.docs.length ?? 0;
                   if (memberSnapshot.hasError) {
                     return AppErrorState(
                       title: "Could not load members",
@@ -244,37 +413,148 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
                     );
                   }
 
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final cardWidth = constraints.maxWidth >= 720
-                          ? (constraints.maxWidth - 24) / 3
-                          : constraints.maxWidth >= 420
-                          ? (constraints.maxWidth - 12) / 2
-                          : constraints.maxWidth;
+                  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: _taskService.getTasks(widget.houseId),
+                    builder: (context, taskSnapshot) {
+                      return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: _houseService.inventoryStream(widget.houseId),
+                        builder: (context, inventorySnapshot) {
+                          return StreamBuilder<
+                            QuerySnapshot<Map<String, dynamic>>
+                          >(
+                            stream: _houseService.messagesStream(
+                              widget.houseId,
+                              limit: 50,
+                            ),
+                            builder: (context, messageSnapshot) {
+                              final memberCount =
+                                  memberSnapshot.data?.docs.length ?? 0;
+                              final taskCount =
+                                  taskSnapshot.data?.docs.length ?? 0;
+                              final inventoryCount =
+                                  inventorySnapshot.data?.docs.length ?? 0;
+                              final messageCount =
+                                  messageSnapshot.data?.docs.length ?? 0;
+                              final currentUser =
+                                  FirebaseAuth.instance.currentUser;
+                              final currentMember = currentUser == null
+                                  ? null
+                                  : memberSnapshot.data!.docs
+                                        .where(
+                                          (member) =>
+                                              member.id == currentUser.uid,
+                                        )
+                                        .firstOrNull
+                                        ?.data();
+                              final isAdmin =
+                                  currentMember != null &&
+                                  RbacService.isAdmin(currentMember);
+                              final recentPeople = _hasRecentActivity(
+                                memberSnapshot.data,
+                                primaryField: 'joinedAt',
+                              );
+                              final recentChat = _hasRecentActivity(
+                                messageSnapshot.data,
+                                primaryField: 'timestamp',
+                              );
+                              final recentInventory = _hasRecentActivity(
+                                inventorySnapshot.data,
+                              );
+                              final recentTask = _hasRecentActivity(
+                                taskSnapshot.data,
+                              );
 
-                      return Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          _overviewCard(
-                            "Members",
-                            'assets/brand/icons/people.svg',
-                            memberCount.toString(),
-                            width: cardWidth,
-                          ),
-                          _overviewCard(
-                            "Tasks",
-                            'assets/brand/icons/tasks.svg',
-                            taskCount.toString(),
-                            width: cardWidth,
-                          ),
-                          _overviewCard(
-                            "Chat",
-                            'assets/brand/icons/chat.svg',
-                            "Live",
-                            width: cardWidth,
-                          ),
-                        ],
+                              return LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final cardWidth = constraints.maxWidth >= 820
+                                      ? (constraints.maxWidth - 36) / 4
+                                      : constraints.maxWidth >= 520
+                                      ? (constraints.maxWidth - 12) / 2
+                                      : constraints.maxWidth;
+
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Wrap(
+                                        spacing: 12,
+                                        runSpacing: 12,
+                                        children: [
+                                          _overviewCard(
+                                            "People",
+                                            'assets/brand/icons/people.svg',
+                                            memberCount.toString(),
+                                            width: cardWidth,
+                                            highlighted:
+                                                _shouldHighlightOverview(
+                                                  'people',
+                                                  recentPeople,
+                                                ),
+                                            onTap: () => _openOverviewTarget(
+                                              'people',
+                                              4,
+                                            ),
+                                          ),
+                                          _overviewCard(
+                                            "Chat",
+                                            'assets/brand/icons/chat.svg',
+                                            messageCount.toString(),
+                                            width: cardWidth,
+                                            highlighted:
+                                                _shouldHighlightOverview(
+                                                  'chat',
+                                                  recentChat,
+                                                ),
+                                            onTap: () =>
+                                                _openOverviewTarget('chat', 1),
+                                          ),
+                                          _overviewCard(
+                                            "Tasks",
+                                            'assets/brand/icons/tasks.svg',
+                                            taskCount.toString(),
+                                            width: cardWidth,
+                                            highlighted:
+                                                _shouldHighlightOverview(
+                                                  'tasks',
+                                                  recentTask,
+                                                ),
+                                            onTap: () =>
+                                                _openOverviewTarget('tasks', 2),
+                                          ),
+                                          _overviewCard(
+                                            "Inventory",
+                                            'assets/brand/icons/inventory.svg',
+                                            inventoryCount.toString(),
+                                            width: cardWidth,
+                                            highlighted:
+                                                _shouldHighlightOverview(
+                                                  'inventory',
+                                                  recentInventory,
+                                                ),
+                                            onTap: () => _openOverviewTarget(
+                                              'inventory',
+                                              3,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (isAdmin) ...[
+                                        const SizedBox(height: 14),
+                                        _adminAnalyticsPanel(
+                                          members: memberSnapshot.data!.docs,
+                                          tasks: taskSnapshot.data?.docs ?? [],
+                                          inventory:
+                                              inventorySnapshot.data?.docs ??
+                                              [],
+                                        ),
+                                      ],
+                                    ],
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
                       );
                     },
                   );
@@ -323,6 +603,7 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
                             leading: const Icon(Icons.bolt),
                             title: Text(data['message'] ?? ""),
                             subtitle: const Text("House activity"),
+                            onTap: () => _openActivity(data),
                           ),
                         );
                       },
@@ -342,37 +623,64 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
     String iconAsset,
     String value, {
     required double width,
+    bool highlighted = false,
+    VoidCallback? onTap,
   }) {
+    final colors = Theme.of(context).colorScheme;
+
     return SizedBox(
       width: width,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              _brandIcon(iconAsset, size: 28),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(title),
-                    Text(
-                      value,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                  ],
-                ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: highlighted
+                  ? colors.primaryContainer.withValues(alpha: 0.82)
+                  : colors.surfaceContainerHighest,
+              border: Border.all(
+                color: highlighted
+                    ? colors.primary.withValues(alpha: 0.42)
+                    : colors.outlineVariant.withValues(alpha: 0.4),
               ),
-            ],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  _brandIcon(iconAsset, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(title),
+                        if (highlighted)
+                          Text(
+                            "New activity",
+                            style: TextStyle(
+                              color: colors.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        Text(
+                          value,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -410,20 +718,11 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (!isMember) ...[
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.group_add),
-                      label: const Text("Join This House"),
-                      onPressed: () async {
-                        try {
-                          await _joinCurrentUserToHouse();
-                        } catch (e) {
-                          if (!context.mounted) return;
-
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text("Error: $e")));
-                        }
-                      },
+                    const AppEmptyState(
+                      icon: Icons.lock_outline,
+                      title: "Invite required",
+                      message:
+                          "Use a valid invite link or code from the Home screen to join this house.",
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -485,6 +784,12 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
             label: const Text("Copy Invite Link"),
             onPressed: _copyInviteLink,
           ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.qr_code_2),
+            label: const Text("Show Invite QR"),
+            onPressed: _showInviteQr,
+          ),
           const SizedBox(height: 20),
           TextField(
             controller: emailController,
@@ -523,12 +828,16 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: _houseService.houseStream(widget.houseId),
           builder: (context, snapshot) {
             final data = snapshot.data?.data();
-            return Text(data?['name'] ?? "House");
+            return Text(
+              data?['name'] ?? "House",
+              overflow: TextOverflow.ellipsis,
+            );
           },
         ),
         actions: [
@@ -537,31 +846,41 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
             tooltip: "Notifications",
             onPressed: _showNotifications,
           ),
-          IconButton(
-            icon: _brandIcon(
-              'assets/brand/icons/people.svg',
-              fallback: Icons.person,
-            ),
-            tooltip: "Profile",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              );
+          const ThemePickerButton(),
+          PopupMenuButton<String>(
+            tooltip: "More",
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'profile') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                );
+              }
+
+              if (value == 'settings') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              }
             },
-          ),
-          IconButton(
-            icon: _brandIcon(
-              'assets/brand/icons/settings.svg',
-              fallback: Icons.settings,
-            ),
-            tooltip: "Settings",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profile',
+                child: ListTile(
+                  leading: Icon(Icons.person),
+                  title: Text("Profile"),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings),
+                  title: Text("Settings"),
+                ),
+              ),
+            ],
           ),
         ],
         bottom: TabBar(
@@ -594,7 +913,7 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
             ),
             Tab(
               icon: _brandIcon(
-                'assets/brand/icons/more.svg',
+                'assets/brand/icons/inventory.svg',
                 size: 22,
                 fallback: Icons.inventory_2,
               ),
@@ -695,18 +1014,116 @@ class ChatTab extends StatefulWidget {
 }
 
 class _ChatTabState extends State<ChatTab> {
+  static const int _messageLimit = 50;
+
   final TextEditingController controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   final HouseService houseService = HouseService();
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _messagesSubscription;
+  List<DocumentSnapshot<Map<String, dynamic>>> _messages = [];
+  Object? _messagesError;
+  bool _isLoadingMessages = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToMessages();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.houseId != widget.houseId) {
+      _subscribeToMessages();
+    }
+  }
 
   @override
   void dispose() {
+    _messagesSubscription?.cancel();
     controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
+  void _subscribeToMessages() {
+    _messagesSubscription?.cancel();
+    _messages = [];
+    _messagesError = null;
+    _isLoadingMessages = true;
+
+    _messagesSubscription = houseService
+        .messagesStream(widget.houseId, limit: _messageLimit)
+        .listen(
+          (snapshot) {
+            final shouldScroll = snapshot.docChanges.any(
+              (change) => change.type == DocumentChangeType.added,
+            );
+
+            if (!mounted) return;
+
+            setState(() {
+              for (final change in snapshot.docChanges) {
+                _messages.removeWhere((doc) => doc.id == change.doc.id);
+
+                if (change.type != DocumentChangeType.removed) {
+                  _messages.add(change.doc);
+                }
+              }
+
+              _messages.sort(_compareMessagesNewestFirst);
+
+              if (_messages.length > _messageLimit) {
+                _messages = _messages.take(_messageLimit).toList();
+              }
+
+              _messagesError = null;
+              _isLoadingMessages = false;
+            });
+
+            if (shouldScroll) _scrollToLatest();
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+
+            setState(() {
+              _messagesError = error;
+              _isLoadingMessages = false;
+            });
+          },
+        );
+  }
+
+  int _compareMessagesNewestFirst(
+    DocumentSnapshot<Map<String, dynamic>> a,
+    DocumentSnapshot<Map<String, dynamic>> b,
+  ) {
+    return _messageSortValue(b).compareTo(_messageSortValue(a));
+  }
+
+  int _messageSortValue(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final timestamp = doc.data()?['timestamp'];
+
+    if (timestamp is Timestamp) {
+      return timestamp.millisecondsSinceEpoch;
+    }
+
+    if (doc.metadata.hasPendingWrites) {
+      return DateTime.now().millisecondsSinceEpoch;
+    }
+
+    return 0;
+  }
+
   Future<void> _sendMessage() async {
+    final message = controller.text.trim();
+
+    if (message.isEmpty) return;
+
     try {
-      await houseService.sendMessage(widget.houseId, controller.text);
+      await houseService.sendMessage(widget.houseId, message);
 
       try {
         await houseService.logActivity(widget.houseId, "sent a message");
@@ -716,6 +1133,7 @@ class _ChatTabState extends State<ChatTab> {
       }
 
       controller.clear();
+      _scrollToLatest();
     } catch (e) {
       if (!mounted) return;
 
@@ -723,6 +1141,18 @@ class _ChatTabState extends State<ChatTab> {
         context,
       ).showSnackBar(SnackBar(content: Text("Message Error: $e")));
     }
+  }
+
+  void _scrollToLatest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
   Widget _responsiveChat({required Widget child}) {
@@ -739,30 +1169,127 @@ class _ChatTabState extends State<ChatTab> {
     );
   }
 
+  String _initial(String value) {
+    final trimmed = value.trim();
+
+    return trimmed.isEmpty ? "?" : trimmed[0].toUpperCase();
+  }
+
+  String _messageTime(Map<String, dynamic> data) {
+    final timestamp = data['timestamp'];
+
+    if (timestamp is Timestamp) {
+      return DateFormat('h:mm a').format(timestamp.toDate());
+    }
+
+    return "Sending...";
+  }
+
+  Widget _messageBubble({
+    required Map<String, dynamic> data,
+    required bool isMine,
+    required bool showSender,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final email = data['email']?.toString() ?? "House member";
+    final text = data['text']?.toString() ?? "";
+    final bubbleColor = isMine
+        ? colors.primaryContainer
+        : colors.surfaceContainerHighest;
+    final textColor = isMine ? colors.onPrimaryContainer : colors.onSurface;
+
+    return Align(
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 620),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Row(
+            mainAxisAlignment: isMine
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!isMine && showSender) ...[
+                CircleAvatar(radius: 14, child: Text(_initial(email))),
+                const SizedBox(width: 8),
+              ] else if (!isMine) ...[
+                const SizedBox(width: 36),
+              ],
+              Flexible(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: bubbleColor,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isMine ? 16 : 4),
+                      bottomRight: Radius.circular(isMine ? 4 : 16),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 7),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!isMine && showSender)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Text(
+                              email,
+                              style: TextStyle(
+                                color: colors.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        Text(text, style: TextStyle(color: textColor)),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            _messageTime(data),
+                            style: TextStyle(
+                              color: textColor.withValues(alpha: 0.7),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return _responsiveChat(
       child: Column(
         children: [
           Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: houseService.messagesStream(widget.houseId),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
+            child: Builder(
+              builder: (context) {
+                if (_messagesError != null) {
                   return AppErrorState(
                     title: "Could not load messages",
-                    error: snapshot.error,
-                    onRetry: () => setState(() {}),
+                    error: _messagesError,
+                    onRetry: _subscribeToMessages,
                   );
                 }
 
-                if (!snapshot.hasData) {
+                if (_isLoadingMessages) {
                   return const AppLoadingState(message: "Loading chat...");
                 }
 
-                final messages = snapshot.data!.docs;
-
-                if (messages.isEmpty) {
+                if (_messages.isEmpty) {
                   return const AppEmptyState(
                     icon: Icons.chat_bubble_outline,
                     title: "No messages yet",
@@ -771,15 +1298,24 @@ class _ChatTabState extends State<ChatTab> {
                 }
 
                 return ListView.builder(
+                  controller: _scrollController,
                   reverse: true,
-                  itemCount: messages.length,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  itemCount: _messages.length,
                   itemBuilder: (context, index) {
-                    final data = messages[index].data();
+                    final data = _messages[index].data() ?? {};
+                    final currentUser = FirebaseAuth.instance.currentUser;
+                    final isMine = data['uid'] == currentUser?.uid;
+                    final nextData = index + 1 < _messages.length
+                        ? _messages[index + 1].data()
+                        : null;
+                    final showSender =
+                        !isMine && nextData?['email'] != data['email'];
 
-                    return ListTile(
-                      leading: const CircleAvatar(child: Icon(Icons.person)),
-                      title: Text(data['text'] ?? ""),
-                      subtitle: const Text("Message"),
+                    return _messageBubble(
+                      data: data,
+                      isMine: isMine,
+                      showSender: showSender,
                     );
                   },
                 );
@@ -793,10 +1329,13 @@ class _ChatTabState extends State<ChatTab> {
                 Expanded(
                   child: TextField(
                     controller: controller,
+                    minLines: 1,
+                    maxLines: 4,
                     decoration: const InputDecoration(
                       hintText: "Type a message...",
                       border: OutlineInputBorder(),
                     ),
+                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1142,6 +1681,7 @@ class _TasksTabState extends State<TasksTab> {
             currentMember != null && RbacService.isAdmin(currentMember);
 
         return Scaffold(
+          backgroundColor: Colors.transparent,
           body: _responsiveTasks(
             child: Column(
               children: [

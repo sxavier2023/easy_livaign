@@ -1,5 +1,9 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+import 'notification_service.dart';
 
 class HouseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -37,10 +41,22 @@ class HouseService {
     ).collection('activity').orderBy('timestamp', descending: true).snapshots();
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> messagesStream(String houseId) {
-    return houseRef(
-      houseId,
-    ).collection('messages').orderBy('timestamp', descending: true).snapshots();
+  Stream<QuerySnapshot<Map<String, dynamic>>> messagesStream(
+    String houseId, {
+    int limit = 50,
+  }) {
+    return houseRef(houseId)
+        .collection('messages')
+        .orderBy('timestamp', descending: true)
+        .limit(limit)
+        .snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> inventoryStream(String houseId) {
+    return houseRef(houseId)
+        .collection('inventory')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> notificationsStream(
@@ -53,7 +69,13 @@ class HouseService {
         .snapshots();
   }
 
-  Future<String> createHouse(String name) async {
+  Future<String> createHouse({
+    required String name,
+    required String country,
+    required String city,
+    required String postCode,
+    required String address,
+  }) async {
     final user = _auth.currentUser;
 
     if (user == null) {
@@ -61,6 +83,10 @@ class HouseService {
     }
 
     final houseName = name.trim();
+    final inviteCode = _generateInviteCode();
+    final expiresAt = Timestamp.fromDate(
+      DateTime.now().add(const Duration(days: 7)),
+    );
 
     if (houseName.isEmpty) {
       throw Exception("House name cannot be empty");
@@ -71,7 +97,13 @@ class HouseService {
     await doc.set({
       'id': doc.id,
       'name': houseName,
+      'country': country.trim(),
+      'city': city.trim(),
+      'postCode': postCode.trim(),
+      'address': address.trim(),
       'ownerId': user.uid,
+      'inviteCode': inviteCode,
+      'inviteExpiresAt': expiresAt,
       'memberIds': [user.uid],
       'members': {
         user.uid: {
@@ -96,14 +128,37 @@ class HouseService {
   }
 
   Future<String> joinHouseFromInput(String input) async {
-    final houseId = _extractHouseId(input);
+    final inviteCode = _extractInviteCode(input);
 
-    await joinHouse(houseId);
+    // ignore: avoid_print
+    print("JOIN INVITE CODE: $inviteCode");
 
-    return houseId;
+    final houseQuery = await _firestore
+        .collection('houses')
+        .where('inviteCode', isEqualTo: inviteCode)
+        .limit(1)
+        .get();
+
+    if (houseQuery.docs.isEmpty) {
+      throw Exception(
+        "Invalid invite code. Check that you pasted the invite code, not the house ID.",
+      );
+    }
+
+    final houseDoc = houseQuery.docs.first;
+    final data = houseDoc.data();
+    final expiresAt = data['inviteExpiresAt'];
+
+    if (expiresAt is Timestamp && expiresAt.toDate().isBefore(DateTime.now())) {
+      throw Exception("Invite link expired");
+    }
+
+    await joinHouse(houseDoc.id, inviteCode: inviteCode);
+
+    return houseDoc.id;
   }
 
-  Future<void> joinHouse(String houseId) async {
+  Future<void> joinHouse(String houseId, {String? inviteCode}) async {
     final user = _auth.currentUser;
 
     if (user == null) {
@@ -118,32 +173,53 @@ class HouseService {
       throw Exception("House not found");
     }
 
+    final houseData = houseDoc.data() ?? {};
+    final currentCode = houseData['inviteCode']?.toString().toUpperCase();
+    final expiresAt = houseData['inviteExpiresAt'];
+
+    if (inviteCode == null || inviteCode.trim().isEmpty) {
+      throw Exception("Invite code is required");
+    }
+
+    if (currentCode != inviteCode.trim().toUpperCase()) {
+      throw Exception("Invalid invite code");
+    }
+
+    if (expiresAt is Timestamp && expiresAt.toDate().isBefore(DateTime.now())) {
+      throw Exception("Invite link expired");
+    }
+
     final memberRef = houseRef.collection('members').doc(user.uid);
 
-    final memberDoc = await memberRef.get();
-
-    // Prevent duplicate joins
-    if (memberDoc.exists) return;
-
-    // Update house document
-    await houseRef.update({
-      'memberIds': FieldValue.arrayUnion([user.uid]),
-      'members.${user.uid}': {
-        'role': 'member',
-        'email': user.email ?? "unknown",
-        'joinedAt': Timestamp.now(),
-      },
-    });
-
-    // Create member subcollection document
-    await memberRef.set({
+    final memberPayload = {
       'uid': user.uid,
       'role': 'member',
       'email': user.email ?? "unknown",
       'displayName': user.displayName ?? "Unknown member",
       'photoUrl': user.photoURL,
+      'joinedWithInviteCode': inviteCode,
       'joinedAt': FieldValue.serverTimestamp(),
+    };
+
+    await memberRef.set(memberPayload, SetOptions(merge: true));
+
+    await houseRef.update({
+      'memberIds': FieldValue.arrayUnion([user.uid]),
+      'members.${user.uid}': {
+        'role': 'member',
+        'email': user.email ?? "unknown",
+        'joinedWithInviteCode': inviteCode,
+        'joinedAt': Timestamp.now(),
+      },
     });
+
+    await NotificationService().createHouseNotification(
+      houseId: houseId,
+      type: 'member_joined',
+      title: 'New member joined',
+      message: '${user.displayName ?? user.email ?? 'A new member'} joined.',
+      targetUserId: user.uid,
+    );
   }
 
   Future<void> sendMessage(String houseId, String text) async {
@@ -157,7 +233,7 @@ class HouseService {
 
     if (message.isEmpty) return;
 
-    await _firestore
+    final doc = await _firestore
         .collection('houses')
         .doc(houseId)
         .collection('messages')
@@ -167,6 +243,14 @@ class HouseService {
           'email': user.email ?? "unknown",
           'timestamp': FieldValue.serverTimestamp(),
         });
+
+    await NotificationService().createHouseNotification(
+      houseId: houseId,
+      type: 'chat_message',
+      title: 'New chat message',
+      message: '${user.displayName ?? user.email ?? 'Someone'}: $message',
+      data: {'messageId': doc.id},
+    );
   }
 
   Future<void> deleteHouse(String houseId) {
@@ -218,7 +302,7 @@ class HouseService {
 
     if (inviteEmail.isEmpty) return;
 
-    final inviteLink = "https://easylivaign.app/join/$houseId";
+    final inviteLink = await inviteLinkForHouse(houseId);
 
     await _firestore.collection('mail').add({
       'to': [inviteEmail],
@@ -264,6 +348,41 @@ Invite link: $inviteLink
     });
   }
 
+  Future<String> inviteLinkForHouse(String houseId) async {
+    final inviteCode = await ensureInviteCode(houseId);
+
+    return "https://easylivaign.app/join?code=$inviteCode";
+  }
+
+  Future<String> ensureInviteCode(String houseId) async {
+    final doc = await houseRef(houseId).get();
+    final data = doc.data();
+
+    if (data == null) {
+      throw Exception("House not found");
+    }
+
+    final currentCode = data['inviteCode']?.toString();
+    final expiresAt = data['inviteExpiresAt'];
+    final isExpired =
+        expiresAt is Timestamp && expiresAt.toDate().isBefore(DateTime.now());
+
+    if (currentCode != null && currentCode.isNotEmpty && !isExpired) {
+      return currentCode;
+    }
+
+    final inviteCode = _generateInviteCode();
+
+    await houseRef(houseId).update({
+      'inviteCode': inviteCode,
+      'inviteExpiresAt': Timestamp.fromDate(
+        DateTime.now().add(const Duration(days: 7)),
+      ),
+    });
+
+    return inviteCode;
+  }
+
   Future<void> logActivity(String houseId, String action) async {
     final user = _auth.currentUser;
 
@@ -285,23 +404,64 @@ Invite link: $inviteLink
         });
   }
 
-  String _extractHouseId(String input) {
-    final value = input.trim();
+  String _extractInviteCode(String input) {
+    final value = input
+        .trim()
+        .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '')
+        .replaceAll(RegExp(r'''^[<"']+|[>"']+$'''), '');
 
     if (value.isEmpty) {
-      throw Exception("House ID cannot be empty");
+      throw Exception("Invite code cannot be empty");
+    }
+
+    final codeMatch = RegExp(
+      r'(?:code|inviteCode)=([A-Za-z0-9_-]+)',
+      caseSensitive: false,
+    ).firstMatch(value);
+
+    if (codeMatch != null) {
+      return codeMatch.group(1)!.trim().toUpperCase();
     }
 
     final uri = Uri.tryParse(value);
 
-    if (uri != null && uri.queryParameters['houseId'] != null) {
-      return uri.queryParameters['houseId']!;
+    if (uri != null && uri.queryParameters['code'] != null) {
+      return uri.queryParameters['code']!.trim().toUpperCase();
+    }
+
+    if (uri != null && uri.fragment.isNotEmpty) {
+      final fragmentUri = Uri.tryParse(uri.fragment);
+
+      if (fragmentUri != null && fragmentUri.queryParameters['code'] != null) {
+        return fragmentUri.queryParameters['code']!.trim().toUpperCase();
+      }
+
+      if (fragmentUri != null && fragmentUri.pathSegments.isNotEmpty) {
+        return fragmentUri.pathSegments.last.trim().toUpperCase();
+      }
     }
 
     if (uri != null && uri.pathSegments.isNotEmpty) {
-      return uri.pathSegments.last;
+      final lastSegment = uri.pathSegments.last.trim();
+
+      if (lastSegment.isNotEmpty && lastSegment.toLowerCase() != 'join') {
+        return lastSegment.toUpperCase();
+      }
     }
 
-    return value;
+    final plainCode = RegExp(r'[A-Za-z0-9]{6,12}').firstMatch(value);
+
+    if (plainCode != null) {
+      return plainCode.group(0)!.toUpperCase();
+    }
+
+    throw Exception("Invite code not found in pasted text");
+  }
+
+  String _generateInviteCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final random = Random.secure();
+
+    return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
   }
 }

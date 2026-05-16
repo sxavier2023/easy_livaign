@@ -76,6 +76,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final photoUrl = _photoUrl ?? user?.photoURL;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
