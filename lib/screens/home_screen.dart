@@ -444,82 +444,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      AppPanel(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            TextField(
-                              controller: houseNameController,
-                              decoration: const InputDecoration(
-                                labelText: "Create House Name",
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            _countryPicker(),
-                            const SizedBox(height: 10),
-                            ElevatedButton.icon(
-                              icon: _brandIcon(
-                                'assets/brand/icons/home.svg',
-                                size: 20,
-                                fallback: Icons.home,
-                              ),
-                              onPressed: () async {
-                                try {
-                                  final name = houseNameController.text.trim();
-
-                                  if (name.isEmpty || _isCreatingHouse) return;
-
-                                  setState(() => _isCreatingHouse = true);
-
-                                  final houseId = await _houseService
-                                      .createHouse(
-                                        name: name,
-                                        country: countryController.text,
-                                        city: '',
-                                        postCode: '',
-                                        address: '',
-                                      );
-
-                                  await _houseService.logActivity(
-                                    houseId,
-                                    "created the house",
-                                  );
-
-                                  houseNameController.clear();
-                                  countryController.clear();
-
-                                  if (!context.mounted) return;
-
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => HouseDashboardScreen(
-                                        houseId: houseId,
-                                      ),
-                                    ),
-                                  );
-                                } catch (e) {
-                                  if (!context.mounted) return;
-
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text("Error: $e")),
-                                  );
-                                } finally {
-                                  if (mounted) {
-                                    setState(() => _isCreatingHouse = false);
-                                  }
-                                }
-                              },
-                              label: Text(
-                                _isCreatingHouse
-                                    ? "Creating..."
-                                    : "Create House",
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
                       const Text(
                         "My Houses",
                         style: TextStyle(
@@ -631,7 +555,83 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         },
                       ),
-                      const Divider(),
+                      const SizedBox(height: 24),
+                      AppPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: houseNameController,
+                              decoration: const InputDecoration(
+                                labelText: "Create House Name",
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            _countryPicker(),
+                            const SizedBox(height: 10),
+                            ElevatedButton.icon(
+                              icon: _brandIcon(
+                                'assets/brand/icons/home.svg',
+                                size: 20,
+                                fallback: Icons.home,
+                              ),
+                              onPressed: () async {
+                                try {
+                                  final name = houseNameController.text.trim();
+
+                                  if (name.isEmpty || _isCreatingHouse) return;
+
+                                  setState(() => _isCreatingHouse = true);
+
+                                  final houseId = await _houseService
+                                      .createHouse(
+                                        name: name,
+                                        country: countryController.text,
+                                        city: '',
+                                        postCode: '',
+                                        address: '',
+                                      );
+
+                                  await _houseService.logActivity(
+                                    houseId,
+                                    "created the house",
+                                  );
+
+                                  houseNameController.clear();
+                                  countryController.clear();
+
+                                  if (!context.mounted) return;
+
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => HouseDashboardScreen(
+                                        houseId: houseId,
+                                      ),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  if (!context.mounted) return;
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Error: $e")),
+                                  );
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isCreatingHouse = false);
+                                  }
+                                }
+                              },
+                              label: Text(
+                                _isCreatingHouse
+                                    ? "Creating..."
+                                    : "Create House",
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
                       AppPanel(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
