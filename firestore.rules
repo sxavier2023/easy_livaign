@@ -1,0 +1,109 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(houseId, uid) {
+      return /databases/$(database)/documents/houses/$(houseId)/members/$(uid);
+    }
+
+    function isHouseMember(houseId) {
+      return signedIn() && exists(memberPath(houseId, request.auth.uid));
+    }
+
+    function currentRole(houseId) {
+      return get(memberPath(houseId, request.auth.uid)).data.role;
+    }
+
+    function isAdmin(houseId) {
+      return isHouseMember(houseId) &&
+        currentRole(houseId) in ['admin', 'owner'];
+    }
+
+    match /houses/{houseId} {
+      allow create: if signedIn();
+      allow read: if signedIn();
+      allow update: if isHouseMember(houseId);
+      allow delete: if isAdmin(houseId);
+
+      match /members/{memberId} {
+        allow read: if isHouseMember(houseId);
+
+        allow create: if signedIn()
+          && memberId == request.auth.uid
+          && request.resource.data.role in ['admin', 'member'];
+
+        allow update: if isAdmin(houseId) ||
+          (
+            signedIn()
+            && memberId == request.auth.uid
+            && request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasOnly(['photoUrl', 'displayName'])
+          );
+
+        allow delete: if isAdmin(houseId);
+      }
+
+      match /messages/{messageId} {
+        allow read, write: if isHouseMember(houseId);
+      }
+
+      match /tasks/{taskId} {
+        allow read, write: if isHouseMember(houseId);
+      }
+
+      match /activity/{activityId} {
+        allow read, write: if isHouseMember(houseId);
+      }
+
+      match /notifications/{notificationId} {
+        allow read, write: if isHouseMember(houseId);
+      }
+
+      match /invites/{inviteId} {
+        allow read, write: if isHouseMember(houseId);
+      }
+
+      match /inventory/{itemId} {
+        allow read, create, update: if isHouseMember(houseId);
+        allow delete: if isAdmin(houseId);
+
+        match /history/{historyId} {
+          allow read, write: if isHouseMember(houseId);
+        }
+      }
+
+      match /inventoryHistory/{historyId} {
+        allow read, write: if isHouseMember(houseId);
+      }
+
+      match /purchases/{purchaseId} {
+        allow read, create, update: if isHouseMember(houseId);
+        allow delete: if isAdmin(houseId);
+      }
+    }
+
+    match /users/{userId} {
+      allow read, update: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn();
+
+      match /fcmTokens/{tokenId} {
+        allow read, write: if signedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /pushQueue/{queueId} {
+      allow create: if signedIn();
+      allow read, update, delete: if false;
+    }
+
+    match /mail/{mailId} {
+      allow create: if signedIn();
+      allow read, update, delete: if false;
+    }
+  }
+}

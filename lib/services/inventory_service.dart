@@ -158,11 +158,14 @@ class InventoryService {
     required String itemName,
     required int quantity,
     required String unit,
+    required double price,
+    String? store,
     required DateTime purchasedAt,
     bool addToStock = true,
   }) async {
     final user = _currentUser();
     final trimmedName = itemName.trim();
+    final trimmedStore = store?.trim() ?? '';
 
     if (trimmedName.isEmpty) return;
 
@@ -209,6 +212,11 @@ class InventoryService {
       'itemName': trimmedName,
       'quantity': quantityValue,
       'unit': unit,
+      'price': price < 0 ? 0 : price,
+      'store': trimmedStore,
+      'purchasedBy': user.uid,
+      'purchasedByEmail': user.email ?? "",
+      'purchasedByName': user.displayName ?? "House member",
       'boughtBy': user.uid,
       'boughtByEmail': user.email ?? "",
       'boughtByName': user.displayName ?? "House member",

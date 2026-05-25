@@ -200,9 +200,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final items = itemsSnapshot.docs;
     final nameController = TextEditingController();
     final quantityController = TextEditingController(text: '1');
+    final priceController = TextEditingController();
+    final storeController = TextEditingController();
     String selectedUnit = _units.first;
     String? selectedItemId;
     bool addToStock = true;
+    bool isSavingPurchase = false;
     DateTime purchasedAt = DateTime.now();
 
     if (!mounted) return;
@@ -312,6 +315,27 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       },
                     ),
                     const SizedBox(height: 12),
+                    TextField(
+                      controller: priceController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: "Price",
+                        prefixText: "€ ",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: storeController,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: "Store (optional)",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     OutlinedButton.icon(
                       icon: const Icon(Icons.event),
                       label: Text(
@@ -351,32 +375,59 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   child: const Text("Cancel"),
                 ),
                 FilledButton(
-                  onPressed: () async {
-                    final selectedData = selectedItem?.data();
-                    final itemName =
-                        selectedData?['name']?.toString() ??
-                        nameController.text.trim();
-                    final quantity =
-                        int.tryParse(quantityController.text.trim()) ?? 0;
+                  onPressed: isSavingPurchase
+                      ? null
+                      : () async {
+                          final selectedData = selectedItem?.data();
+                          final itemName =
+                              selectedData?['name']?.toString() ??
+                              nameController.text.trim();
+                          final quantity =
+                              int.tryParse(quantityController.text.trim()) ?? 0;
+                          final price =
+                              double.tryParse(
+                                priceController.text.trim().replaceAll(
+                                  ',',
+                                  '.',
+                                ),
+                              ) ??
+                              0;
 
-                    if (itemName.trim().isEmpty || quantity <= 0) return;
+                          if (itemName.trim().isEmpty || quantity <= 0) return;
 
-                    await _inventoryService.addPurchase(
-                      houseId: widget.houseId,
-                      itemId: selectedItemId,
-                      itemName: itemName,
-                      quantity: quantity,
-                      unit: selectedUnit,
-                      purchasedAt: purchasedAt,
-                      addToStock: addToStock,
-                    );
+                          try {
+                            setDialogState(() => isSavingPurchase = true);
 
-                    if (!context.mounted) return;
+                            await _inventoryService.addPurchase(
+                              houseId: widget.houseId,
+                              itemId: selectedItemId,
+                              itemName: itemName,
+                              quantity: quantity,
+                              unit: selectedUnit,
+                              price: price,
+                              store: storeController.text,
+                              purchasedAt: purchasedAt,
+                              addToStock: addToStock,
+                            );
+                          } catch (e) {
+                            if (!context.mounted) return;
 
-                    Navigator.pop(context);
-                    setState(() => _selectedView = 'purchases');
-                  },
-                  child: const Text("Save Purchase"),
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text("Could not save purchase: $e"),
+                              ),
+                            );
+
+                            setDialogState(() => isSavingPurchase = false);
+                            return;
+                          }
+
+                          if (!context.mounted) return;
+
+                          Navigator.pop(context);
+                          setState(() => _selectedView = 'purchases');
+                        },
+                  child: Text(isSavingPurchase ? "Saving..." : "Save Purchase"),
                 ),
               ],
             );
@@ -404,6 +455,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
 
     return 'Not updated yet';
+  }
+
+  String _moneyText(num value) {
+    return NumberFormat.currency(locale: 'de_DE', symbol: '€').format(value);
   }
 
   String _historyMessage(Map<String, dynamic> data) {
@@ -526,6 +581,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
         }
 
         final purchases = snapshot.data!.docs;
+        final total = purchases.fold<double>(0, (runningTotal, doc) {
+          final data = doc.data();
+          final price = (data['price'] as num?)?.toDouble() ?? 0;
+
+          return runningTotal + price;
+        });
 
         if (purchases.isEmpty) {
           return const AppEmptyState(
@@ -536,37 +597,77 @@ class _InventoryScreenState extends State<InventoryScreen> {
         }
 
         return _responsiveInventory(
-          child: ListView.separated(
-            padding: EdgeInsets.symmetric(
-              horizontal: MediaQuery.sizeOf(context).width >= 900 ? 32 : 16,
-              vertical: 16,
-            ),
-            itemCount: purchases.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final data = purchases[index].data();
-              final itemName = data['itemName']?.toString() ?? 'Item';
-              final quantity = (data['quantity'] as num?)?.toInt() ?? 0;
-              final unit = data['unit']?.toString() ?? 'pcs';
-              final boughtBy =
-                  data['boughtByName']?.toString() ??
-                  data['boughtByEmail']?.toString() ??
-                  'House member';
-              final purchasedAt = _timestampText(data['purchasedAt']);
-
-              return Card(
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.shopping_bag_outlined),
-                  ),
-                  title: Text(itemName),
-                  subtitle: Text(
-                    '$quantity $unit\nBought by: $boughtBy\nPurchased: $purchasedAt',
-                  ),
-                  isThreeLine: true,
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  MediaQuery.sizeOf(context).width >= 900 ? 32 : 16,
+                  16,
+                  MediaQuery.sizeOf(context).width >= 900 ? 32 : 16,
+                  0,
                 ),
-              );
-            },
+                child: Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.payments_outlined),
+                    ),
+                    title: const Text("Total purchase history"),
+                    subtitle: Text("${purchases.length} purchases logged"),
+                    trailing: Text(
+                      _moneyText(total),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: MediaQuery.sizeOf(context).width >= 900
+                        ? 32
+                        : 16,
+                    vertical: 16,
+                  ),
+                  itemCount: purchases.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final data = purchases[index].data();
+                    final itemName = data['itemName']?.toString() ?? 'Item';
+                    final quantity = (data['quantity'] as num?)?.toInt() ?? 0;
+                    final unit = data['unit']?.toString() ?? 'pcs';
+                    final price = (data['price'] as num?) ?? 0;
+                    final store = data['store']?.toString() ?? '';
+                    final boughtBy =
+                        data['purchasedByName']?.toString() ??
+                        data['purchasedByEmail']?.toString() ??
+                        data['boughtByName']?.toString() ??
+                        data['boughtByEmail']?.toString() ??
+                        'House member';
+                    final purchasedAt = _timestampText(
+                      data['purchasedAt'] ?? data['createdAt'],
+                    );
+                    final storeText = store.trim().isEmpty
+                        ? ''
+                        : '\nStore: $store';
+
+                    return Card(
+                      child: ListTile(
+                        leading: const CircleAvatar(
+                          child: Icon(Icons.shopping_cart_outlined),
+                        ),
+                        title: Text(itemName),
+                        subtitle: Text(
+                          '$quantity $unit • ${_moneyText(price)}\nBought by: $boughtBy$storeText\nPurchased: $purchasedAt',
+                        ),
+                        isThreeLine: true,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },
