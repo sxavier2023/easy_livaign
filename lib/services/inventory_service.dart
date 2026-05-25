@@ -40,6 +40,7 @@ class InventoryService {
     final quantityValue = quantity < 0 ? 0 : quantity;
     final doc = await _inventoryRef(houseId).add({
       'name': itemName,
+      'normalizedName': _normalizedItemName(itemName),
       'quantity': quantityValue,
       'unit': unit,
       'addedBy': user.uid,
@@ -88,6 +89,7 @@ class InventoryService {
 
     await itemRef.update({
       'name': name.trim(),
+      'normalizedName': _normalizedItemName(itemName),
       'quantity': quantityValue,
       'unit': unit,
       'updatedBy': user.uid,
@@ -174,21 +176,17 @@ class InventoryService {
 
     if (addToStock) {
       if (resolvedItemId == null || resolvedItemId.isEmpty) {
-        final itemDoc = await _inventoryRef(houseId).add({
-          'name': trimmedName,
-          'quantity': quantityValue,
-          'unit': unit,
-          'addedBy': user.uid,
-          'addedByEmail': user.email ?? "",
-          'addedByName': user.displayName ?? "House member",
-          'updatedBy': user.uid,
-          'updatedByEmail': user.email ?? "",
-          'updatedByName': user.displayName ?? "House member",
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+        resolvedItemId = await _findMatchingInventoryItem(houseId, trimmedName);
+      }
 
-        resolvedItemId = itemDoc.id;
+      if (resolvedItemId == null || resolvedItemId.isEmpty) {
+        resolvedItemId = await _createStockItemFromPurchase(
+          houseId: houseId,
+          itemName: trimmedName,
+          quantity: quantityValue,
+          unit: unit,
+          user: user,
+        );
       } else {
         final itemRef = _inventoryRef(houseId).doc(resolvedItemId);
         final itemDoc = await itemRef.get();
@@ -197,6 +195,7 @@ class InventoryService {
             (previousData['quantity'] as num?)?.toInt() ?? 0;
 
         await itemRef.update({
+          'normalizedName': _normalizedItemName(trimmedName),
           'quantity': currentQuantity + quantityValue,
           'unit': unit,
           'updatedBy': user.uid,
@@ -303,6 +302,65 @@ class InventoryService {
 
   CollectionReference<Map<String, dynamic>> _purchasesRef(String houseId) {
     return _firestore.collection('houses').doc(houseId).collection('purchases');
+  }
+
+  String _normalizedItemName(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  Future<String?> _findMatchingInventoryItem(
+    String houseId,
+    String itemName,
+  ) async {
+    final normalizedName = _normalizedItemName(itemName);
+
+    if (normalizedName.isEmpty) return null;
+
+    final normalizedQuery = await _inventoryRef(
+      houseId,
+    ).where('normalizedName', isEqualTo: normalizedName).limit(1).get();
+
+    if (normalizedQuery.docs.isNotEmpty) {
+      return normalizedQuery.docs.first.id;
+    }
+
+    final existingItems = await _inventoryRef(houseId).limit(100).get();
+
+    for (final item in existingItems.docs) {
+      final data = item.data();
+      final existingName = data['name']?.toString() ?? '';
+
+      if (_normalizedItemName(existingName) == normalizedName) {
+        return item.id;
+      }
+    }
+
+    return null;
+  }
+
+  Future<String> _createStockItemFromPurchase({
+    required String houseId,
+    required String itemName,
+    required int quantity,
+    required String unit,
+    required User user,
+  }) async {
+    final itemDoc = await _inventoryRef(houseId).add({
+      'name': itemName,
+      'normalizedName': _normalizedItemName(itemName),
+      'quantity': quantity,
+      'unit': unit,
+      'addedBy': user.uid,
+      'addedByEmail': user.email ?? "",
+      'addedByName': user.displayName ?? "House member",
+      'updatedBy': user.uid,
+      'updatedByEmail': user.email ?? "",
+      'updatedByName': user.displayName ?? "House member",
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    return itemDoc.id;
   }
 
   User _currentUser() {

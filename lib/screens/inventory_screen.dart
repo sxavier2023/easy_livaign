@@ -204,7 +204,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final storeController = TextEditingController();
     String selectedUnit = _units.first;
     String? selectedItemId;
-    bool addToStock = true;
     bool isSavingPurchase = false;
     DateTime purchasedAt = DateTime.now();
 
@@ -354,17 +353,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         setDialogState(() => purchasedAt = pickedDate);
                       },
                     ),
-                    CheckboxListTile(
-                      value: addToStock,
+                    const ListTile(
                       contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text("Add this purchase to stock"),
-                      subtitle: const Text(
-                        "Keeps purchase history and inventory quantity connected.",
+                      leading: Icon(Icons.sync),
+                      title: Text("Stock updates automatically"),
+                      subtitle: Text(
+                        "Existing stock with the same item name is increased; otherwise a new stock item is created.",
                       ),
-                      onChanged: (value) {
-                        setDialogState(() => addToStock = value ?? true);
-                      },
                     ),
                   ],
                 ),
@@ -407,7 +402,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               price: price,
                               store: storeController.text,
                               purchasedAt: purchasedAt,
-                              addToStock: addToStock,
+                              addToStock: true,
                             );
                           } catch (e) {
                             if (!context.mounted) return;
