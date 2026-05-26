@@ -80,15 +80,39 @@ class ThemeService {
         surfaceTintColor: Colors.transparent,
       ),
       cardTheme: CardThemeData(
-        elevation: 0,
+        elevation: 1,
         margin: EdgeInsets.zero,
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.88),
+        shadowColor: scheme.shadow.withValues(alpha: 0.14),
+        surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           side: BorderSide(
             color: scheme.outlineVariant.withValues(alpha: 0.55),
           ),
           borderRadius: const BorderRadius.all(Radius.circular(8)),
         ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        minLeadingWidth: 40,
+      ),
+      tabBarTheme: TabBarThemeData(
+        dividerColor: scheme.outlineVariant.withValues(alpha: 0.55),
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        elevation: 2,
+        backgroundColor: surface.withValues(alpha: 0.94),
+        indicatorColor: scheme.primaryContainer,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
+
+          return TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+          );
+        }),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(

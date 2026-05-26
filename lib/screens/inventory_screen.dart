@@ -584,10 +584,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
         });
 
         if (purchases.isEmpty) {
-          return const AppEmptyState(
+          return AppEmptyState(
             icon: Icons.receipt_long_outlined,
             title: "No purchases yet",
             message: "Add a purchase to track what was bought and by whom.",
+            action: FilledButton.icon(
+              icon: const Icon(Icons.add_shopping_cart_outlined),
+              label: const Text("Add Purchase"),
+              onPressed: _showPurchaseDialog,
+            ),
           );
         }
 
@@ -688,11 +693,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
         final items = snapshot.data!.docs;
 
         if (items.isEmpty) {
-          return const AppEmptyState(
+          return AppEmptyState(
             icon: Icons.inventory_2_outlined,
             title: "No inventory items yet",
             message:
                 "Add groceries, cleaning supplies, or shared household items.",
+            action: FilledButton.icon(
+              icon: const Icon(Icons.add),
+              label: const Text("Add Item"),
+              onPressed: _showItemDialog,
+            ),
           );
         }
 

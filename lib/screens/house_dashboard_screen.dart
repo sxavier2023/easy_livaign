@@ -44,6 +44,7 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
   final AuthService _authService = AuthService();
   final TaskService _taskService = TaskService();
   final Set<String> _seenOverviewHighlights = {};
+  late int _currentTabIndex;
 
   DocumentReference<Map<String, dynamic>> get houseRef =>
       _houseService.houseRef(widget.houseId);
@@ -51,18 +52,19 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
   @override
   void initState() {
     super.initState();
+    _currentTabIndex = widget.initialTabIndex.clamp(0, 4);
     _tabController = TabController(
       length: 5,
       vsync: this,
-      initialIndex: widget.initialTabIndex.clamp(0, 4),
+      initialIndex: _currentTabIndex,
     );
-    _tabController.addListener(_clearHighlightForCurrentTab);
-    _clearHighlightForCurrentTab();
+    _tabController.addListener(_handleTabChanged);
+    _markHighlightSeenForIndex(_currentTabIndex);
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_clearHighlightForCurrentTab);
+    _tabController.removeListener(_handleTabChanged);
     _tabController.dispose();
     emailController.dispose();
     phoneController.dispose();
@@ -285,12 +287,19 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
     };
   }
 
-  void _clearHighlightForCurrentTab() {
-    final key = _overviewKeyForTab(_tabController.index);
+  void _markHighlightSeenForIndex(int index) {
+    final key = _overviewKeyForTab(index);
 
-    if (key == null || _seenOverviewHighlights.contains(key)) return;
+    if (key != null) _seenOverviewHighlights.add(key);
+  }
 
-    setState(() => _seenOverviewHighlights.add(key));
+  void _handleTabChanged() {
+    if (!mounted) return;
+
+    setState(() {
+      _currentTabIndex = _tabController.index;
+      _markHighlightSeenForIndex(_currentTabIndex);
+    });
   }
 
   void _openOverviewTarget(String key, int tabIndex) {
@@ -584,7 +593,11 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
                     );
 
                     if (items.isEmpty) {
-                      return const Center(child: Text("Nothing to show"));
+                      return const AppEmptyState(
+                        icon: Icons.bolt_outlined,
+                        title: "Nothing to show",
+                        message: "Recent house activity will appear here.",
+                      );
                     }
 
                     return ListView.separated(
@@ -640,23 +653,40 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
-          child: DecoratedBox(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            constraints: const BoxConstraints(minHeight: 112),
             decoration: BoxDecoration(
               color: highlighted
-                  ? colors.primaryContainer.withValues(alpha: 0.82)
-                  : colors.surfaceContainerHighest,
+                  ? colors.primaryContainer.withValues(alpha: 0.9)
+                  : colors.surfaceContainerHighest.withValues(alpha: 0.88),
               border: Border.all(
                 color: highlighted
-                    ? colors.primary.withValues(alpha: 0.42)
-                    : colors.outlineVariant.withValues(alpha: 0.4),
+                    ? colors.primary.withValues(alpha: 0.5)
+                    : colors.outlineVariant.withValues(alpha: 0.55),
               ),
               borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.shadow.withValues(
+                    alpha: highlighted ? 0.12 : 0.06,
+                  ),
+                  blurRadius: highlighted ? 20 : 12,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  _brandIcon(iconAsset, size: 28),
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: highlighted
+                        ? colors.primary.withValues(alpha: 0.13)
+                        : colors.primaryContainer.withValues(alpha: 0.62),
+                    child: _brandIcon(iconAsset, size: 24),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -682,6 +712,11 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
                         ),
                       ],
                     ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: colors.onSurfaceVariant,
                   ),
                 ],
               ),
@@ -832,6 +867,8 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
+    final useBottomNavigation = MediaQuery.sizeOf(context).width < 720;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -858,52 +895,54 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
             },
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: [
-            Tab(
-              icon: _brandIcon(
-                'assets/brand/icons/home.svg',
-                size: 22,
-                fallback: Icons.home,
+        bottom: useBottomNavigation
+            ? null
+            : TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                tabs: [
+                  Tab(
+                    icon: _brandIcon(
+                      'assets/brand/icons/home.svg',
+                      size: 22,
+                      fallback: Icons.home,
+                    ),
+                    text: "Overview",
+                  ),
+                  Tab(
+                    icon: _brandIcon(
+                      'assets/brand/icons/chat.svg',
+                      size: 22,
+                      fallback: Icons.chat,
+                    ),
+                    text: "Chat",
+                  ),
+                  Tab(
+                    icon: _brandIcon(
+                      'assets/brand/icons/tasks.svg',
+                      size: 22,
+                      fallback: Icons.check_box,
+                    ),
+                    text: "Tasks",
+                  ),
+                  Tab(
+                    icon: _brandIcon(
+                      'assets/brand/icons/inventory.svg',
+                      size: 22,
+                      fallback: Icons.inventory_2,
+                    ),
+                    text: "Inventory",
+                  ),
+                  Tab(
+                    icon: _brandIcon(
+                      'assets/brand/icons/people.svg',
+                      size: 22,
+                      fallback: Icons.people,
+                    ),
+                    text: "People",
+                  ),
+                ],
               ),
-              text: "Overview",
-            ),
-            Tab(
-              icon: _brandIcon(
-                'assets/brand/icons/chat.svg',
-                size: 22,
-                fallback: Icons.chat,
-              ),
-              text: "Chat",
-            ),
-            Tab(
-              icon: _brandIcon(
-                'assets/brand/icons/tasks.svg',
-                size: 22,
-                fallback: Icons.check_box,
-              ),
-              text: "Tasks",
-            ),
-            Tab(
-              icon: _brandIcon(
-                'assets/brand/icons/inventory.svg',
-                size: 22,
-                fallback: Icons.inventory_2,
-              ),
-              text: "Inventory",
-            ),
-            Tab(
-              icon: _brandIcon(
-                'assets/brand/icons/people.svg',
-                size: 22,
-                fallback: Icons.people,
-              ),
-              text: "People",
-            ),
-          ],
-        ),
       ),
       body: TabBarView(
         controller: _tabController,
@@ -915,6 +954,57 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
           _buildPeopleTab(),
         ],
       ),
+      bottomNavigationBar: useBottomNavigation
+          ? NavigationBar(
+              selectedIndex: _currentTabIndex,
+              onDestinationSelected: (index) {
+                setState(() => _currentTabIndex = index);
+                _tabController.animateTo(index);
+              },
+              destinations: [
+                NavigationDestination(
+                  icon: _brandIcon(
+                    'assets/brand/icons/home.svg',
+                    size: 22,
+                    fallback: Icons.home,
+                  ),
+                  label: "Overview",
+                ),
+                NavigationDestination(
+                  icon: _brandIcon(
+                    'assets/brand/icons/chat.svg',
+                    size: 22,
+                    fallback: Icons.chat,
+                  ),
+                  label: "Chat",
+                ),
+                NavigationDestination(
+                  icon: _brandIcon(
+                    'assets/brand/icons/tasks.svg',
+                    size: 22,
+                    fallback: Icons.check_box,
+                  ),
+                  label: "Tasks",
+                ),
+                NavigationDestination(
+                  icon: _brandIcon(
+                    'assets/brand/icons/inventory.svg',
+                    size: 22,
+                    fallback: Icons.inventory_2,
+                  ),
+                  label: "Inventory",
+                ),
+                NavigationDestination(
+                  icon: _brandIcon(
+                    'assets/brand/icons/people.svg',
+                    size: 22,
+                    fallback: Icons.people,
+                  ),
+                  label: "People",
+                ),
+              ],
+            )
+          : null,
     );
   }
 
