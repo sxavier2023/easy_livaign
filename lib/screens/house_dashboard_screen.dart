@@ -397,8 +397,8 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
         }
 
         return _responsiveContent(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: ListView(
+            padding: EdgeInsets.zero,
             children: [
               Text(
                 data['name'] ?? "House",
@@ -584,50 +584,49 @@ class _HouseDashboardScreenState extends State<HouseDashboardScreen>
 
               const SizedBox(height: 10),
 
-              Expanded(
-                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: _houseService.activityStream(widget.houseId),
-                  builder: (context, activitySnapshot) {
-                    final items = _overviewActivityItems(
-                      activities: activitySnapshot.data,
+              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _houseService.activityStream(widget.houseId),
+                builder: (context, activitySnapshot) {
+                  final items = _overviewActivityItems(
+                    activities: activitySnapshot.data,
+                  );
+
+                  if (items.isEmpty) {
+                    return const AppEmptyState(
+                      icon: Icons.bolt_outlined,
+                      title: "Nothing to show",
+                      message: "Recent house activity will appear here.",
                     );
+                  }
 
-                    if (items.isEmpty) {
-                      return const AppEmptyState(
-                        icon: Icons.bolt_outlined,
-                        title: "Nothing to show",
-                        message: "Recent house activity will appear here.",
-                      );
-                    }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      final target = item.target;
 
-                    return ListView.separated(
-                      itemCount: items.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final item = items[index];
-                        final target = item.target;
-
-                        return Card(
-                          child: ListTile(
-                            leading: CircleAvatar(child: Icon(item.icon)),
-                            title: Text(item.title),
-                            subtitle: Text(
-                              "${item.message}\n${item.formattedDate}",
-                            ),
-                            isThreeLine: true,
-                            trailing: target == null
-                                ? null
-                                : const Icon(Icons.arrow_forward_ios, size: 16),
-                            onTap: target == null
-                                ? null
-                                : () =>
-                                      _openOverviewTarget(target.$1, target.$2),
+                      return Card(
+                        child: ListTile(
+                          leading: CircleAvatar(child: Icon(item.icon)),
+                          title: Text(item.title),
+                          subtitle: Text(
+                            "${item.message}\n${item.formattedDate}",
                           ),
-                        );
-                      },
-                    );
-                  },
-                ),
+                          isThreeLine: true,
+                          trailing: target == null
+                              ? null
+                              : const Icon(Icons.arrow_forward_ios, size: 16),
+                          onTap: target == null
+                              ? null
+                              : () => _openOverviewTarget(target.$1, target.$2),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
             ],
           ),

@@ -590,12 +590,23 @@ class _InventoryScreenState extends State<InventoryScreen> {
         }
 
         final purchases = snapshot.data!.docs;
-        final total = purchases.fold<double>(0, (runningTotal, doc) {
+        final contributions = <String, double>{};
+
+        for (final doc in purchases) {
           final data = doc.data();
+          final boughtBy =
+              data['purchasedByName']?.toString() ??
+              data['purchasedByEmail']?.toString() ??
+              data['boughtByName']?.toString() ??
+              data['boughtByEmail']?.toString() ??
+              'House member';
           final price = (data['price'] as num?)?.toDouble() ?? 0;
 
-          return runningTotal + price;
-        });
+          contributions[boughtBy] = (contributions[boughtBy] ?? 0) + price;
+        }
+
+        final contributionEntries = contributions.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
 
         if (purchases.isEmpty) {
           return AppEmptyState(
@@ -621,17 +632,55 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   0,
                 ),
                 child: Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.payments_outlined),
-                    ),
-                    title: const Text("Total purchase history"),
-                    subtitle: Text("${purchases.length} purchases logged"),
-                    trailing: Text(
-                      _moneyText(total),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const CircleAvatar(
+                              child: Icon(Icons.payments_outlined),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "Contribution overview",
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text("${purchases.length} purchases logged"),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ...contributionEntries.map((entry) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    entry.key,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  _moneyText(entry.value),
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
                     ),
                   ),
                 ),
