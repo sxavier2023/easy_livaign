@@ -193,19 +193,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  Future<void> _showPurchaseDialog() async {
+  Future<void> _showPurchaseDialog({
+    String? itemId,
+    Map<String, dynamic>? item,
+  }) async {
     final itemsSnapshot = await _inventoryService.getItemsSnapshot(
       widget.houseId,
     );
     final items = itemsSnapshot.docs;
-    final nameController = TextEditingController();
+    final nameController = TextEditingController(
+      text: item?['name']?.toString() ?? '',
+    );
     final quantityController = TextEditingController(text: '1');
     final priceController = TextEditingController();
     final storeController = TextEditingController();
-    String selectedUnit = _units.first;
-    String? selectedItemId;
+    String selectedUnit = item?['unit']?.toString() ?? _units.first;
+    String? selectedItemId = itemId;
     bool isSavingPurchase = false;
     DateTime purchasedAt = DateTime.now();
+    final lockedToStockItem = itemId != null;
 
     if (!mounted) return;
 
@@ -219,7 +225,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 : items.where((item) => item.id == selectedItemId).firstOrNull;
 
             return AlertDialog(
-              title: const Text("Add Purchase"),
+              title: Text(
+                lockedToStockItem ? "Add Stock Purchase" : "Add Purchase",
+              ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -245,30 +253,32 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           );
                         }),
                       ],
-                      onChanged: (value) {
-                        final nextItem = value == null
-                            ? null
-                            : items
-                                  .where((item) => item.id == value)
-                                  .firstOrNull;
-                        setDialogState(() {
-                          selectedItemId = value;
-                          final data = nextItem?.data();
-                          if (data != null) {
-                            nameController.text =
-                                data['name']?.toString() ?? '';
-                            selectedUnit =
-                                data['unit']?.toString() ?? _units.first;
-                          } else {
-                            nameController.clear();
-                          }
-                        });
-                      },
+                      onChanged: lockedToStockItem
+                          ? null
+                          : (value) {
+                              final nextItem = value == null
+                                  ? null
+                                  : items
+                                        .where((item) => item.id == value)
+                                        .firstOrNull;
+                              setDialogState(() {
+                                selectedItemId = value;
+                                final data = nextItem?.data();
+                                if (data != null) {
+                                  nameController.text =
+                                      data['name']?.toString() ?? '';
+                                  selectedUnit =
+                                      data['unit']?.toString() ?? _units.first;
+                                } else {
+                                  nameController.clear();
+                                }
+                              });
+                            },
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: nameController,
-                      enabled: selectedItemId == null,
+                      enabled: selectedItemId == null && !lockedToStockItem,
                       textCapitalization: TextCapitalization.sentences,
                       onChanged: (_) => setDialogState(() {}),
                       decoration: const InputDecoration(
@@ -281,7 +291,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       suggestions: _householdItemSuggestions,
                       controller: nameController,
                       setDialogState: setDialogState,
-                      enabled: selectedItemId == null,
+                      enabled: selectedItemId == null && !lockedToStockItem,
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -373,7 +383,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   onPressed: isSavingPurchase
                       ? null
                       : () async {
-                          final selectedData = selectedItem?.data();
+                          final selectedData = selectedItem?.data() ?? item;
                           final itemName =
                               selectedData?['name']?.toString() ??
                               nameController.text.trim();
@@ -420,7 +430,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           if (!context.mounted) return;
 
                           Navigator.pop(context);
-                          setState(() => _selectedView = 'purchases');
+                          setState(() {
+                            _selectedView = lockedToStockItem
+                                ? 'stock'
+                                : 'purchases';
+                          });
                         },
                   child: Text(isSavingPurchase ? "Saving..." : "Save Purchase"),
                 ),
@@ -790,14 +804,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                       ),
                                 ),
                                 IconButton.outlined(
-                                  tooltip: "Increase",
+                                  tooltip: "Add purchase",
                                   icon: const Icon(Icons.add),
-                                  onPressed: () =>
-                                      _inventoryService.updateQuantity(
-                                        houseId: widget.houseId,
-                                        itemId: doc.id,
-                                        quantity: quantity + 1,
-                                      ),
+                                  onPressed: () => _showPurchaseDialog(
+                                    itemId: doc.id,
+                                    item: data,
+                                  ),
                                 ),
                                 IconButton.outlined(
                                   tooltip: "Edit",
