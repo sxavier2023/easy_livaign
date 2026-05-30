@@ -573,6 +573,68 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  Future<void> _showContributionBreakdown(
+    List<MapEntry<String, double>> contributions,
+    int purchaseCount,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("User contributions"),
+          content: SizedBox(
+            width: 420,
+            child: contributions.isEmpty
+                ? const Text("No contribution data yet.")
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("$purchaseCount purchases logged"),
+                      const SizedBox(height: 12),
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: contributions.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final entry = contributions[index];
+
+                            return ListTile(
+                              leading: CircleAvatar(
+                                child: Text(
+                                  entry.key.trim().isEmpty
+                                      ? "?"
+                                      : entry.key.trim()[0].toUpperCase(),
+                                ),
+                              ),
+                              title: Text(
+                                entry.key,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: Text(
+                                _moneyText(entry.value),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildPurchaseHistory() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _inventoryService.purchasesStream(widget.houseId),
@@ -632,55 +694,72 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   0,
                 ),
                 child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const CircleAvatar(
-                              child: Icon(Icons.payments_outlined),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    "Contribution overview",
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _showContributionBreakdown(
+                      contributionEntries,
+                      purchases.length,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const CircleAvatar(
+                                child: Icon(Icons.payments_outlined),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      "Total purchase history",
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    Text(
+                                      "Tap to view user contributions",
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                          if (contributionEntries.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: contributionEntries.take(3).map((
+                                entry,
+                              ) {
+                                return Chip(
+                                  avatar: CircleAvatar(
+                                    child: Text(
+                                      entry.key.trim().isEmpty
+                                          ? "?"
+                                          : entry.key.trim()[0].toUpperCase(),
                                     ),
                                   ),
-                                  Text("${purchases.length} purchases logged"),
-                                ],
-                              ),
+                                  label: Text(
+                                    "${entry.key}: ${_moneyText(entry.value)}",
+                                  ),
+                                );
+                              }).toList(),
                             ),
                           ],
-                        ),
-                        const SizedBox(height: 12),
-                        ...contributionEntries.map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    entry.key,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  _moneyText(entry.value),
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w800),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
